@@ -1,5 +1,6 @@
 import sys
 import matplotlib.pyplot as plt
+from ordered_set import OrderedSet
 
 def readinventory(filename):
     """Read phoneme inventory and store in a dictionary."""
@@ -130,6 +131,53 @@ def find_avg_sublist_length(lst, keys):
                 avg_lengths[value][1] += 1
 
     return {k: v[0] / v[1] for k, v in avg_lengths.items()}
+
+def find_best_tree(features, segments, order, fd, idx, trees):
+    def get_feat_description(ordered_feat, feat_dict, seg):
+        feat_description = []
+        mode_description = []
+        for feat in ordered_feat:
+            if seg <= feat_dict[feat]['+']:
+                feat_description.append(feat)
+                mode_description.append('+')
+            elif seg <= feat_dict[feat]['-']:
+                feat_description.append(feat)
+                mode_description.append('-')
+        return feat_description, mode_description
+    
+    def check_feats(fd, feats, modes, correct):
+        """Check if proposed feature combination is a valid solution."""
+        newbase = allsegments
+        for idx, feat in enumerate(feats):
+            mode = modes[idx]
+            newbase = newbase & fd[feat][mode]
+        if newbase != correct:
+            return False
+        return True
+    
+    """
+    - Iterate over features:
+        - find segments that are described by that feature (either with + or - signs)
+        - check if the added feature generates a natural class for each segment
+        - add the feature to the descriptions of those phoneme that have that feature
+    - store the resulting feature descriptions generated with that tree
+    Return: a dictionary where keys represent the order in which the features were applied and the values are dictionaries with the natural 
+    class generated for each phoneme
+    """
+    # iterate over features
+    nat_classes = {}
+    for i in range(idx, len(features)):
+        order.append(features[i]) # keep track of the order of the features
+        segments = segments & (fd[features[i]]['+'] + fd[features[i]]['-']) # find segments being described by given feature
+        for seg in segments:
+            if seg not in nat_classes[seg]: # only continue if no natural class has been found for that segment yet
+                feats, modes = get_feat_description(order, fd, seg) # get feature description of the segment for the given feature order so far
+                if check_feats(fd, feats, modes, seg): # check if the description is a natural class for the given segment
+                    nat_classes[seg] = [feats, modes]
+        find_best_tree(features[i], segments, order, fd, idx + 1, trees)
+    trees[order] =  nat_classes
+    return order
+# find_best_tree(features, allsegments, OrderedSet([]), fd, 0, {})
 
 ##############################################################################
 
