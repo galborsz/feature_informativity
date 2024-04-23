@@ -1,6 +1,7 @@
 import sys
 import matplotlib.pyplot as plt
 from ordered_set import OrderedSet
+import os
 
 def readinventory(filename):
     """Read phoneme inventory and store in a dictionary."""
@@ -190,11 +191,18 @@ i = 1
 if sys.argv[1] == '-v':
     verbose = True
     i += 1
-        
+
 inventoryfile = sys.argv[i]
 fd, allsegments = readinventory(inventoryfile)
- #set(sys.argv[i+1].split(','))
 
+if len(sys.argv) == 3:
+    language = sys.argv[2]
+    with open(f"{language}.txt", "r") as file:
+        lines = file.readlines()
+    selected_segments = [line.strip() for line in lines]
+    allsegments = set(selected_segments)
+
+print(allsegments)
 minimal_natural_classes = []
 natural_classes = []
 for testset in allsegments:
@@ -224,25 +232,28 @@ for testset in allsegments:
     print()
 
     solutions = {}
-
-    if base == testset: # check if the procedure above has resulted in the phoneme being tested (i.e. we have the correct general feature description and it is a natural class)
-        print("Set is a natural class")
-        print("Trying branch-and-bound")
-        maxlen = len(feats)
-        reccheck(fd, feats, modes, [], [], base, 0)
-        for s in solutions.values():
-            for a in s:
-                natural_classes.append(a)  
-        minsol = min(solutions.keys())
-        print("Minimal solution(s):")
-        for s in solutions[minsol]:
-            print(s)
-            minimal_natural_classes.append(s)
-        print("Trying greedy search")
-        greedy(fd, feats, modes, base)
-    else:
-        # the given phoneme does not have a feature description that distinguishes it from all the other phonemes (i.e. does not have a natural class)
-        print("Set is not a natural class")
+    with open(f'natural_classes_{inventoryfile}_{language}.txt', 'a') as file:
+        if base == testset: # check if the procedure above has resulted in the phoneme being tested (i.e. we have the correct general feature description and it is a natural class)
+            file.write(f"\nPhoneme: {base}")
+            print("Set is a natural class")
+            print("Trying branch-and-bound")
+            maxlen = len(feats)
+            reccheck(fd, feats, modes, [], [], base, 0)
+            for s in solutions.values():
+                for a in s:
+                    # Writing text
+                    file.write(f"\n{a}")
+                    natural_classes.append(a)  
+            minsol = min(solutions.keys())
+            print("Minimal solution(s):")
+            for s in solutions[minsol]:
+                print(s)
+                minimal_natural_classes.append(s)
+            print("Trying greedy search")
+            greedy(fd, feats, modes, base)
+        else:
+            # the given phoneme does not have a feature description that distinguishes it from all the other phonemes (i.e. does not have a natural class)
+            print("Set is not a natural class")
 
 min_order = find_smallest_sublist_length(minimal_natural_classes)
 min_order = dict(sorted(min_order.items(), key=lambda item: item[1]))
