@@ -1,6 +1,5 @@
 import sys
 import matplotlib.pyplot as plt
-from ordered_set import OrderedSet
 import os
 
 def readinventory(filename):
@@ -8,7 +7,7 @@ def readinventory(filename):
     featdict = {}
     allsegments = set()
 
-    lines = [line.strip() for line in open(filename)]
+    lines = [line.strip() for line in open(f'feature_sets/{filename}.txt')]
     fields = lines[0].split()
     for f in fields:
         featdict[f] = {}
@@ -20,8 +19,8 @@ def readinventory(filename):
         if len(thisline) == 0:
             continue
         linefields = thisline.split()
-        if len(linefields) != len(fields) + 1:
-            print("Field length mismatch on line " + i+1)
+        if len(linefields)!= len(fields) + 1 :
+            print(f"Field length mismatch on line {i+1}")
             quit()
         phoneme = linefields[0]
         allsegments |= {phoneme}
@@ -131,54 +130,41 @@ def find_avg_sublist_length(lst, keys):
                 avg_lengths[value][0] += len(sublist)
                 avg_lengths[value][1] += 1
 
-    return {k: v[0] / v[1] for k, v in avg_lengths.items()}
+    return {k: v[0] / v[1] if v[1] != 0 else 0 for k, v in avg_lengths.items()}
 
-def find_best_tree(features, segments, order, fd, idx, trees):
-    def get_feat_description(ordered_feat, feat_dict, seg):
-        feat_description = []
-        mode_description = []
-        for feat in ordered_feat:
-            if seg <= feat_dict[feat]['+']:
-                feat_description.append(feat)
-                mode_description.append('+')
-            elif seg <= feat_dict[feat]['-']:
-                feat_description.append(feat)
-                mode_description.append('-')
-        return feat_description, mode_description
-    
-    def check_feats(fd, feats, modes, correct):
-        """Check if proposed feature combination is a valid solution."""
-        newbase = allsegments
-        for idx, feat in enumerate(feats):
-            mode = modes[idx]
-            newbase = newbase & fd[feat][mode]
-        if newbase != correct:
-            return False
-        return True
-    
-    """
-    - Iterate over features:
-        - find segments that are described by that feature (either with + or - signs)
-        - check if the added feature generates a natural class for each segment
-        - add the feature to the descriptions of those phoneme that have that feature
-    - store the resulting feature descriptions generated with that tree
-    Return: a dictionary where keys represent the order in which the features were applied and the values are dictionaries with the natural 
-    class generated for each phoneme
-    """
-    # iterate over features
-    nat_classes = {}
-    for i in range(idx, len(features)):
-        order.append(features[i]) # keep track of the order of the features
-        segments = segments & (fd[features[i]]['+'] + fd[features[i]]['-']) # find segments being described by given feature
-        for seg in segments:
-            if seg not in nat_classes[seg]: # only continue if no natural class has been found for that segment yet
-                feats, modes = get_feat_description(order, fd, seg) # get feature description of the segment for the given feature order so far
-                if check_feats(fd, feats, modes, seg): # check if the description is a natural class for the given segment
-                    nat_classes[seg] = [feats, modes]
-        find_best_tree(features[i], segments, order, fd, idx + 1, trees)
-    trees[order] =  nat_classes
-    return order
-# find_best_tree(features, allsegments, OrderedSet([]), fd, 0, {})
+def find_min_feature_per_phoneme(lst, language, inventory):
+    if not os.path.exists(f'{language}_perphoneme_{inventory}'):
+        os.makedirs(f'{language}_perphoneme_{inventory}')
+    for phoneme in lst:
+        min_lengths = {}
+        for sublist in lst[phoneme]:
+            sublist = sublist.strip("[]").split(',')
+            # Iterate through each unique value
+            for value in sublist:
+                value = value.strip('+')
+                value = value.strip('-')
+                # Check if the value already exists in the dictionary
+                if value in min_lengths:
+                    # If the length of the current sublist is smaller than the stored length,
+                    # update the stored length
+                    min_lengths[value] = min(min_lengths[value], len(sublist))
+                else:
+                    # If the value doesn't exist in the dictionary, add it with the length
+                    min_lengths[value] = len(sublist)
+
+        min_lengths = dict(sorted(min_lengths.items(), key=lambda item: item[1]))
+        classes = list(min_lengths.keys())
+        counts = list(min_lengths.values())
+
+        # Plot the histogram
+        plt.bar(classes, counts, width=0.8)
+        plt.title(f"Phoneme {phoneme}")
+        plt.xlabel('Feature')
+        plt.ylabel('Length minimal feature description')
+        plt.xticks(rotation=90)
+        plt.locator_params(axis="y", integer=True)
+        plt.savefig(f'{language}_perphoneme_{inventory}/{phoneme}.jpg', bbox_inches='tight')
+        plt.close()
 
 ##############################################################################
 
@@ -205,6 +191,7 @@ if len(sys.argv) == 3:
 print(allsegments)
 minimal_natural_classes = []
 natural_classes = []
+natural_classes_perphoneme = {}
 for testset in allsegments:
     features = [f for f in fd]
     base = allsegments
@@ -243,7 +230,11 @@ for testset in allsegments:
                 for a in s:
                     # Writing text
                     file.write(f"\n{a}")
-                    natural_classes.append(a)  
+                    natural_classes.append(a) 
+                    if list(testset)[0] in natural_classes_perphoneme:
+                        natural_classes_perphoneme[list(testset)[0]].append(a)
+                    else: 
+                        natural_classes_perphoneme[list(testset)[0]] = []
             minsol = min(solutions.keys())
             print("Minimal solution(s):")
             for s in solutions[minsol]:
@@ -255,6 +246,10 @@ for testset in allsegments:
             # the given phoneme does not have a feature description that distinguishes it from all the other phonemes (i.e. does not have a natural class)
             print("Set is not a natural class")
 
+
+find_min_feature_per_phoneme(natural_classes_perphoneme, language, inventoryfile)
+
+
 min_order = find_smallest_sublist_length(minimal_natural_classes)
 min_order = dict(sorted(min_order.items(), key=lambda item: item[1]))
 classes = list(min_order.keys())
@@ -263,10 +258,10 @@ counts = list(min_order.values())
 # Plot the histogram
 plt.bar(classes, counts, width=0.8)
 plt.xlabel('Feature')
-plt.ylabel('Length minimal natural class')
+plt.ylabel('Length minimal feature description')
 plt.xticks(rotation=90)
 plt.locator_params(axis="y", integer=True)
-plt.savefig('minfeatureimportance.jpg', bbox_inches='tight')
+plt.savefig(f'minfeatureimportance_{language}_{inventoryfile}.jpg', bbox_inches='tight')
 plt.close()
 
 avg_order = find_avg_sublist_length(natural_classes, list(fd.keys()))
@@ -277,8 +272,8 @@ counts = list(avg_order.values())
 # Plot the histogram
 plt.bar(classes, counts, width=0.8)
 plt.xlabel('Feature')
-plt.ylabel('Average length natural classes')
+plt.ylabel('Average length feature descriptions')
 plt.xticks(rotation=90)
 plt.locator_params(axis="y", integer=True)
-plt.savefig('avgfeatureimportance.jpg', bbox_inches='tight')
+plt.savefig(f'avgfeatureimportance_{language}_{inventoryfile}.jpg', bbox_inches='tight')
 plt.close()
