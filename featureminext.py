@@ -99,8 +99,6 @@ def greedy(fd, basefeats, basemodes, correct):
             break
     print("Greedy solution:", bestfeatures)
 
-def count_features():
-    return
 
 def find_lengths(lst):
     lengths = {}
@@ -112,31 +110,42 @@ def find_lengths(lst):
             lengths[len(features)] = 1
     return lengths
 
-def find_smallest_description_length_and_count(lst):
+def find_smallest_description_length(lst):
     min_lengths = {}
-    phoneme_counts = {}
+    min_descriptions = {}
 
-    for sublist in lst:
-        sublist = sublist.strip("[]").split(',')
-        # Iterate through each unique value
-        for value in sublist:
-            value = value.strip('+') # remove + symbols
-            value = value.strip('-') # remove - symbols
-            # Check if the value already exists in the dictionary
-            if value in min_lengths:
-                # If the length of the current sublist is smaller than the stored length,
-                # update the stored length
-                min_lengths[value] = min(min_lengths[value], len(sublist))
+    for phoneme in lst:
+        for sublist in lst[phoneme]:
+            sublist = sublist.strip("[]").split(',')
+            # Iterate through each unique value
+            for value in sublist:
+                value = value.strip('+') # remove + symbols
+                value = value.strip('-') # remove - symbols
+                # Check if the value already exists in the dictionary
+                if value in min_lengths:
+                    # If the length of the current sublist is smaller than the stored length,
+                    # update the stored length
+                    min_lengths[value] = min(min_lengths[value], len(sublist))
+                else:
+                    # If the value doesn't exist in the dictionary, add it with the length
+                    min_lengths[value] = len(sublist)
+                
+            if phoneme in min_descriptions:
+                if len(min_descriptions[phoneme]) > len(sublist):
+                    min_descriptions[phoneme] = sublist
             else:
-                # If the value doesn't exist in the dictionary, add it with the length
-                min_lengths[value] = len(sublist)
+                min_descriptions[phoneme] = sublist
 
-            if value in phoneme_counts:
-                phoneme_counts[value] += 1
+    counts = {}
+    # count features in minimal descriptions
+    for phoneme in lst:
+        for value in min_descriptions[phoneme]:
+            if value in counts:
+                counts[value] += 1
             else:
-                phoneme_counts[value] = 1
+                counts[value] = 1
 
-    return min_lengths, phoneme_counts
+    return min_lengths, min_descriptions, counts
 
 def find_avg_sublist_length(lst, keys):
     avg_lengths = {key: [0,0] for key in keys}
@@ -300,10 +309,10 @@ plt.savefig(f'normalizedcountminimaldescription.jpg', bbox_inches='tight')
 plt.close()
 
 
-min_order, count_phoneme = find_smallest_description_length_and_count(minimal_natural_classes)
-min_order = dict(sorted(min_order.items(), key=lambda item: item[1]))
-classes = list(min_order.keys())
-counts = list(min_order.values())
+min_order, min_descriptions, count_phoneme = find_smallest_description_length(natural_classes_perphoneme)
+count_phoneme = dict(sorted(count_phoneme.items(), key=lambda item: item[1]))
+classes = list(count_phoneme.keys())
+counts = list(count_phoneme.values())
 
 # Plot the histogram
 plt.bar(classes, counts, width=0.8)
@@ -315,9 +324,9 @@ plt.locator_params(axis="y", integer=True)
 plt.savefig(f'countphonemesperfeature.jpg', bbox_inches='tight')
 plt.close()
 
-count_phoneme = dict(sorted(count_phoneme.items(), key=lambda item: item[1]))
-classes = list(count_phoneme.keys())
-counts = list(count_phoneme.values())
+min_order = dict(sorted(min_order.items(), key=lambda item: item[1]))
+classes = list(min_order.keys())
+counts = list(min_order.values())
 
 # Plot the histogram
 plt.bar(classes, counts, width=0.8)
