@@ -99,15 +99,29 @@ def greedy(fd, basefeats, basemodes, correct):
             break
     print("Greedy solution:", bestfeatures)
 
-def find_smallest_sublist_length(lst):
+def count_features():
+    return
+
+def find_lengths(lst):
+    lengths = {}
+    for sublist in lst:
+        features = sublist.split(',')
+        if len(features) in lengths:
+            lengths[len(features)] += 1
+        else:
+            lengths[len(features)] = 1
+    return lengths
+
+def find_smallest_description_length_and_count(lst):
     min_lengths = {}
+    phoneme_counts = {}
 
     for sublist in lst:
         sublist = sublist.strip("[]").split(',')
         # Iterate through each unique value
         for value in sublist:
-            value = value.strip('+')
-            value = value.strip('-')
+            value = value.strip('+') # remove + symbols
+            value = value.strip('-') # remove - symbols
             # Check if the value already exists in the dictionary
             if value in min_lengths:
                 # If the length of the current sublist is smaller than the stored length,
@@ -117,7 +131,12 @@ def find_smallest_sublist_length(lst):
                 # If the value doesn't exist in the dictionary, add it with the length
                 min_lengths[value] = len(sublist)
 
-    return min_lengths
+            if value in phoneme_counts:
+                phoneme_counts[value] += 1
+            else:
+                phoneme_counts[value] = 1
+
+    return min_lengths, phoneme_counts
 
 def find_avg_sublist_length(lst, keys):
     avg_lengths = {key: [0,0] for key in keys}
@@ -247,10 +266,41 @@ for testset in allsegments:
             print("Set is not a natural class")
 
 
-find_min_feature_per_phoneme(natural_classes_perphoneme, language, inventoryfile)
+# find_min_feature_per_phoneme(natural_classes_perphoneme, language, inventoryfile)
+length_order = find_lengths(minimal_natural_classes)
+length_order = dict(sorted(length_order.items(), key=lambda item: item[1]))
+classes = list(length_order.keys())
+counts = list(length_order.values())
+
+# Plot the histogram
+plt.bar(classes, counts, width=0.8)
+plt.xlabel('Length')
+plt.ylabel('Count')
+plt.title(f'Count of minimal descriptions for various lengths. \n({language} phonemic inventory with {inventoryfile} feature set)')
+plt.xticks(rotation=90)
+plt.locator_params(axis="y", integer=True)
+plt.savefig(f'countminimaldescription.jpg', bbox_inches='tight')
+plt.close()
+
+total_sum = sum(length_order.values())
+normalized_lengths = {key: value / total_sum for key, value in length_order.items()}
+normalized_lengths = dict(sorted(normalized_lengths.items(), key=lambda item: item[1]))
+classes = list(normalized_lengths.keys())
+counts = list(normalized_lengths.values())
+
+# Plot the histogram
+plt.bar(classes, counts, width=0.8)
+plt.xlabel('Length')
+plt.ylabel('Normalized count')
+plt.title(f'Normalized count of minimal descriptions for various lengths \n({language} phonemic inventory with {inventoryfile} feature set)')
+plt.xticks(rotation=90)
+plt.ylim(top=1)
+# plt.locator_params(axis="y", integer=True, nbins=10)
+plt.savefig(f'normalizedcountminimaldescription.jpg', bbox_inches='tight')
+plt.close()
 
 
-min_order = find_smallest_sublist_length(minimal_natural_classes)
+min_order, count_phoneme = find_smallest_description_length_and_count(minimal_natural_classes)
 min_order = dict(sorted(min_order.items(), key=lambda item: item[1]))
 classes = list(min_order.keys())
 counts = list(min_order.values())
@@ -258,10 +308,25 @@ counts = list(min_order.values())
 # Plot the histogram
 plt.bar(classes, counts, width=0.8)
 plt.xlabel('Feature')
-plt.ylabel('Length minimal feature description')
+plt.ylabel('Count')
+plt.title(f'Count of phonemes with feature in minimal description\n({language} phonemic inventory with {inventoryfile} feature set)')
 plt.xticks(rotation=90)
 plt.locator_params(axis="y", integer=True)
-plt.savefig(f'minfeatureimportance_{language}_{inventoryfile}.jpg', bbox_inches='tight')
+plt.savefig(f'countphonemesperfeature.jpg', bbox_inches='tight')
+plt.close()
+
+count_phoneme = dict(sorted(count_phoneme.items(), key=lambda item: item[1]))
+classes = list(count_phoneme.keys())
+counts = list(count_phoneme.values())
+
+# Plot the histogram
+plt.bar(classes, counts, width=0.8)
+plt.xlabel('Feature')
+plt.ylabel('Length of minimal feature description')
+plt.title(f'{language} phonemic inventory with {inventoryfile} feature set')
+plt.xticks(rotation=90)
+plt.locator_params(axis="y", integer=True)
+plt.savefig(f'minfeatureimportance.jpg', bbox_inches='tight')
 plt.close()
 
 avg_order = find_avg_sublist_length(natural_classes, list(fd.keys()))
@@ -272,8 +337,8 @@ counts = list(avg_order.values())
 # Plot the histogram
 plt.bar(classes, counts, width=0.8)
 plt.xlabel('Feature')
-plt.ylabel('Average length feature descriptions')
+plt.ylabel('Average length of feature description')
 plt.xticks(rotation=90)
 plt.locator_params(axis="y", integer=True)
-plt.savefig(f'avgfeatureimportance_{language}_{inventoryfile}.jpg', bbox_inches='tight')
+plt.savefig(f'avgfeatureimportance.jpg', bbox_inches='tight')
 plt.close()
