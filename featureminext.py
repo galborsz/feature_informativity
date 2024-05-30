@@ -181,6 +181,86 @@ def aux_plotting_function(values, title, xlabel, ylabel, path, xint):
     plt.savefig(path, bbox_inches='tight')
     plt.close() 
 
+def count_minimal_descriptions(tree, minimal_descriptions):
+    
+    count = 0
+    for phoneme in tree:
+        description = tree[phoneme]
+        stripped_descriptions = [set(item.strip("[]").split(',')) for item in minimal_descriptions[phoneme]]
+        if set(description) in stripped_descriptions:
+            # print('\ncounted: ', phoneme, set(description), '\n')
+            count += 1
+    return count
+
+def concat_partial_trees(previous, current):
+    new = {}
+    for phoneme in previous:
+        new[phoneme] = list(set(previous[phoneme]) | set(current[phoneme]))
+    return new
+
+def find_best_tree_recursive(partial_trees, idx, current_tree, minimal_descriptions):
+    # base case
+    if idx == len(partial_trees):
+        print('\nfinal: ', current_tree, '\n')
+
+    # iterate through filled dicts above
+    for partial_tree in partial_trees[idx:]:
+        # add the current tree and a new tree
+        new_tree = concat_partial_trees(current_tree, partial_tree)
+
+        # check if the addition results in a partial tree with more or equal amount of minimal descriptions
+        # print('\ncount new tree: ', count_minimal_descriptions(new_tree, minimal_descriptions), new_tree, '\n')
+        # print('\ncount current tree: ', count_minimal_descriptions(current_tree, minimal_descriptions), current_tree, '\n')
+        if count_minimal_descriptions(new_tree, minimal_descriptions) >= count_minimal_descriptions(current_tree, minimal_descriptions):
+            # call recursive function for next dict
+            find_best_tree_recursive(partial_trees, idx + 1, new_tree, minimal_descriptions)
+
+def find_best_tree(natural_classes_perphoneme, fd):
+    """
+    Find combinations of minimal feature descriptions that can form a tree together. That combination that has the most minimal descriptions 
+    together will be the best tree. Those phonemes without any description yet can have any description that fits the tree (so no need to compute those)
+    """
+
+    print('\n-------------------------\n')
+    minimal_descriptions_perphoneme = {}
+    for phoneme, descriptions in natural_classes_perphoneme.items():
+        shortest = []
+        shortest_length = 0
+
+        for description in reversed(descriptions):
+            if not shortest: 
+                shortest.append(description)
+                shortest_length = len(description.strip("[]").split(','))
+            else:
+                if len(description.strip("[]").split(',')) == shortest_length:
+                    shortest.append(description)
+
+        minimal_descriptions_perphoneme[phoneme] = shortest
+
+    print('\nsmallest_trees: ', minimal_descriptions_perphoneme, '\n')
+
+    partial_trees = []
+    for phoneme in minimal_descriptions_perphoneme:
+        
+        for description in minimal_descriptions_perphoneme[phoneme]:
+            partial_tree = {key: [] for key in minimal_descriptions_perphoneme}
+            print('\ndescription: ', description, '\n')
+            description = description.strip("[]").split(',')
+            for feature in description:
+                feature = feature.strip('+')
+                feature = feature.strip('-')
+                phonemes_plus = fd[feature]['+']
+                phonemes_minus = fd[feature]['-']
+                for phoneme_plus in phonemes_plus:
+                    partial_tree[phoneme_plus].append('+'+feature)
+                for phoneme_minus in phonemes_minus:
+                    partial_tree[phoneme_minus].append('-'+feature)
+            partial_trees.append(partial_tree)
+
+    print('\npartial_trees: ', partial_trees, '\n')
+
+    find_best_tree_recursive(partial_trees, 1, partial_trees[0], minimal_descriptions_perphoneme)
+
 ##############################################################################
 
 if len(sys.argv) < 2:
@@ -261,28 +341,39 @@ for testset in allsegments:
             # the given phoneme does not have a feature description that distinguishes it from all the other phonemes (i.e. does not have a natural class)
             print("Set is not a natural class")
 
+test = {'a': ['[+f1,-f2,+f3]', '[-f2,+f3,+f1]', '[-f2,+f1]', '[-f2,+f3]', '[-f1,+f3]', '[+f1]'], 
+        'b': ['[+f2,-f3,-f4]', '[-f3,+f2]', '[-f4,+f2]', '[-f4,-f3]', '[+f2]'],
+        'c': ['[-f1,-f2,+f3,+f4]', '[-f2,-f1,+f3]', '[-f2,-f1,+f4]', '[-f2,+f3,+f4]', '[-f2,+f4]', '[-f1,+f3]', '[-f1,+f4]', '[+f4]'], 
+        'd': ['[-f1,-f2,-f3,-f4]', '[-f2,-f1,-f3]', '[-f2,-f1,-f4]', '[-f1,-f4,-f3]', '[-f4,-f2,-f3]', '[-f4,-f1]', '[-f2,-f3]', '[-f2,-f4]']}
 
-min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths = get_general_info_natural_classes(natural_classes_perphoneme, list(fd.keys()))
+fd2 = {'f1': {'name': 'f1', '+': {'a'}, '-': {'c', 'd'}}, 
+        'f2': {'name': 'f2', '+': {'b'}, '-': {'a', 'c', 'd'}}, 
+        'f3': {'name': 'f3', '+': {'a', 'c'}, '-': {'b', 'd'}}, 
+        'f4': {'name': 'f4', '+': {'c'}, '-': {'b', 'd'}}, }
 
-title = f'Count of minimal descriptions for various lengths \n({language} phonemic inventory with {inventoryfile} feature set)'
-path = f'countminimaldescription.jpg'
-aux_plotting_function(count_lengths, title, 'Length', 'Count', path, True)
+find_best_tree(test, fd2)
 
-total_sum = sum(count_lengths.values())
-normalized_lengths = {key: value / total_sum for key, value in count_lengths.items()}
+# min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths = get_general_info_natural_classes(natural_classes_perphoneme, list(fd.keys()))
 
-title = f'Normalized count of minimal descriptions for various lengths \n({language} phonemic inventory with {inventoryfile} feature set)'
-path = f'normalizedcountminimaldescription.jpg'
-aux_plotting_function(normalized_lengths, title, 'Length', 'Normalized count', path, True)
+# title = f'Count of minimal descriptions for various lengths \n({language} phonemic inventory with {inventoryfile} feature set)'
+# path = f'countminimaldescription.jpg'
+# aux_plotting_function(count_lengths, title, 'Length', 'Count', path, True)
 
-title = f'The number of times the feature is included in the minimal description of a phoneme\n({language} phonemic inventory with {inventoryfile} feature set)'
-path = f'countphonemesperfeature.jpg'
-aux_plotting_function(count_phoneme, title, 'Feature', 'Count', path, False)
+# total_sum = sum(count_lengths.values())
+# normalized_lengths = {key: value / total_sum for key, value in count_lengths.items()}
 
-title = f'Length of minimal feature description\n({language} phonemic inventory with {inventoryfile} feature set)'
-path = f'minfeatureimportance.jpg'
-aux_plotting_function(min_lengths, title, 'Feature', 'Length', path, False)
+# title = f'Normalized count of minimal descriptions for various lengths \n({language} phonemic inventory with {inventoryfile} feature set)'
+# path = f'normalizedcountminimaldescription.jpg'
+# aux_plotting_function(normalized_lengths, title, 'Length', 'Normalized count', path, True)
 
-title = f'Average length of feature description\n({language} phonemic inventory with {inventoryfile} feature set)'
-path = f'avgfeatureimportance.jpg'
-aux_plotting_function(avg_lengths, title, 'Feature', 'Average length', path, False)
+# title = f'The number of times the feature is included in the minimal description of a phoneme\n({language} phonemic inventory with {inventoryfile} feature set)'
+# path = f'countphonemesperfeature.jpg'
+# aux_plotting_function(count_phoneme, title, 'Feature', 'Count', path, False)
+
+# title = f'Length of minimal feature description\n({language} phonemic inventory with {inventoryfile} feature set)'
+# path = f'minfeatureimportance.jpg'
+# aux_plotting_function(min_lengths, title, 'Feature', 'Length', path, False)
+
+# title = f'Average length of feature description\n({language} phonemic inventory with {inventoryfile} feature set)'
+# path = f'avgfeatureimportance.jpg'
+# aux_plotting_function(avg_lengths, title, 'Feature', 'Average length', path, False)
