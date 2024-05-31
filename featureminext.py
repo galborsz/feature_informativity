@@ -201,7 +201,14 @@ def concat_partial_trees(previous, current):
 def find_best_tree_recursive(partial_trees, idx, current_tree, minimal_descriptions):
     # base case
     if idx == len(partial_trees):
-        print('\nfinal: ', current_tree, '\n')
+        result = {}
+        for phoneme in current_tree:
+            description = current_tree[phoneme]
+            stripped_descriptions = [set(item.strip("[]").split(',')) for item in minimal_descriptions[phoneme]]
+            if set(description) in stripped_descriptions:
+                result[phoneme] = description
+            else: result[phoneme] = []
+        print('\nfinal: ', result, '\n')
 
     # iterate through filled dicts above
     for partial_tree in partial_trees[idx:]:
