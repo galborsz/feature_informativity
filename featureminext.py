@@ -188,7 +188,6 @@ def count_minimal_descriptions(tree, minimal_descriptions):
         description = tree[phoneme]
         stripped_descriptions = [set(item.strip("[]").split(',')) for item in minimal_descriptions[phoneme]]
         if set(description) in stripped_descriptions:
-            # print('\ncounted: ', phoneme, set(description), '\n')
             count += 1
     return count
 
@@ -198,29 +197,61 @@ def concat_partial_trees(previous, current):
         new[phoneme] = list(set(previous[phoneme]) | set(current[phoneme]))
     return new
 
+def are_all_lists_empty(dictionary):
+    for value in dictionary.values():
+        if value:  # if the list is not empty, it will be truthy
+            return False
+    return True
+
+list_result = []
+
 def find_best_tree_recursive(partial_trees, idx, current_tree, minimal_descriptions):
     # base case
-    if idx == len(partial_trees):
-        result = {}
-        for phoneme in current_tree:
-            description = current_tree[phoneme]
-            stripped_descriptions = [set(item.strip("[]").split(',')) for item in minimal_descriptions[phoneme]]
-            if set(description) in stripped_descriptions:
-                result[phoneme] = description
-            else: result[phoneme] = []
-        print('\nfinal: ', result, '\n')
+    if idx == len(partial_trees) + 1:
+        return
+
+    result = {}
+    for phoneme in current_tree:
+        description = current_tree[phoneme]
+        stripped_descriptions = [set(item.strip("[]").split(',')) for item in minimal_descriptions[phoneme]]
+        if set(description) in stripped_descriptions:
+            result[phoneme] = description
+        else: result[phoneme] = []
+    
+    if not are_all_lists_empty(result): list_result.append(result) 
 
     # iterate through filled dicts above
     for partial_tree in partial_trees[idx:]:
+        print('\ncurrent_tree: ', count_minimal_descriptions(current_tree, minimal_descriptions), current_tree, '\n')
+        print('\npartial_tree: ', count_minimal_descriptions(partial_tree, minimal_descriptions), partial_tree, '\n')
         # add the current tree and a new tree
         new_tree = concat_partial_trees(current_tree, partial_tree)
+        print('\nnew_tree: ', count_minimal_descriptions(new_tree, minimal_descriptions), new_tree, '\n')
 
         # check if the addition results in a partial tree with more or equal amount of minimal descriptions
-        # print('\ncount new tree: ', count_minimal_descriptions(new_tree, minimal_descriptions), new_tree, '\n')
-        # print('\ncount current tree: ', count_minimal_descriptions(current_tree, minimal_descriptions), current_tree, '\n')
-        if count_minimal_descriptions(new_tree, minimal_descriptions) >= count_minimal_descriptions(current_tree, minimal_descriptions):
+        if count_minimal_descriptions(new_tree, minimal_descriptions) >= count_minimal_descriptions(current_tree, minimal_descriptions) + count_minimal_descriptions(partial_tree, minimal_descriptions):
             # call recursive function for next dict
+            print('\nselected\n')
             find_best_tree_recursive(partial_trees, idx + 1, new_tree, minimal_descriptions)
+        find_best_tree_recursive(partial_trees, idx + 1, partial_tree, minimal_descriptions)
+
+def dicts_are_equal(dict1, dict2):
+    # Check if both dictionaries have the same keys
+    if dict1.keys() != dict2.keys():
+        return False
+    
+    # Check if the lists (as sets) are the same for each key
+    for key in dict1:
+        if set(dict1[key]) != set(dict2[key]):
+            return False
+            
+    return True
+
+def is_dict_in_list(dict_list, target_dict):
+    for d in dict_list:
+        if dicts_are_equal(d, target_dict):
+            return True
+    return False
 
 def find_best_tree(natural_classes_perphoneme, fd):
     """
@@ -244,14 +275,15 @@ def find_best_tree(natural_classes_perphoneme, fd):
 
         minimal_descriptions_perphoneme[phoneme] = shortest
 
-    print('\nsmallest_trees: ', minimal_descriptions_perphoneme, '\n')
+    print('\nsmallest_trees: ', len(minimal_descriptions_perphoneme), minimal_descriptions_perphoneme, '\n')
 
+    # Get all partial trees
     partial_trees = []
     for phoneme in minimal_descriptions_perphoneme:
         
         for description in minimal_descriptions_perphoneme[phoneme]:
             partial_tree = {key: [] for key in minimal_descriptions_perphoneme}
-            print('\ndescription: ', description, '\n')
+            # print('\ndescription: ', description, '\n')
             description = description.strip("[]").split(',')
             for feature in description:
                 feature = feature.strip('+')
@@ -259,10 +291,15 @@ def find_best_tree(natural_classes_perphoneme, fd):
                 phonemes_plus = fd[feature]['+']
                 phonemes_minus = fd[feature]['-']
                 for phoneme_plus in phonemes_plus:
-                    partial_tree[phoneme_plus].append('+'+feature)
+                    if phoneme_plus in minimal_descriptions_perphoneme:
+                        partial_tree[phoneme_plus].append('+'+feature)
                 for phoneme_minus in phonemes_minus:
-                    partial_tree[phoneme_minus].append('-'+feature)
-            partial_trees.append(partial_tree)
+                    if phoneme_minus in minimal_descriptions_perphoneme:
+                        partial_tree[phoneme_minus].append('-'+feature)
+
+            # only store unique trees
+            if not is_dict_in_list(partial_trees, partial_tree):
+                partial_trees.append(partial_tree)
 
     print('\npartial_trees: ', partial_trees, '\n')
 
@@ -348,18 +385,35 @@ for testset in allsegments:
             # the given phoneme does not have a feature description that distinguishes it from all the other phonemes (i.e. does not have a natural class)
             print("Set is not a natural class")
 
-test = {'a': ['[+f1,-f2,+f3]', '[-f2,+f3,+f1]', '[-f2,+f1]', '[-f2,+f3]', '[-f1,+f3]', '[+f1]'], 
-        'b': ['[+f2,-f3,-f4]', '[-f3,+f2]', '[-f4,+f2]', '[-f4,-f3]', '[+f2]'],
-        'c': ['[-f1,-f2,+f3,+f4]', '[-f2,-f1,+f3]', '[-f2,-f1,+f4]', '[-f2,+f3,+f4]', '[-f2,+f4]', '[-f1,+f3]', '[-f1,+f4]', '[+f4]'], 
-        'd': ['[-f1,-f2,-f3,-f4]', '[-f2,-f1,-f3]', '[-f2,-f1,-f4]', '[-f1,-f4,-f3]', '[-f4,-f2,-f3]', '[-f4,-f1]', '[-f2,-f3]', '[-f2,-f4]']}
+# test = {'a': ['[+f1,-f2,+f3]', '[-f2,+f3,+f1]', '[-f2,+f1]', '[-f2,+f3]', '[-f1,+f3]', '[+f1]'], 
+#         'b': ['[+f2,-f3,-f4]', '[-f3,+f2]', '[-f4,+f2]', '[-f4,-f3]', '[+f2]'],
+#         'c': ['[-f1,-f2,+f3,+f4]', '[-f2,-f1,+f3]', '[-f2,-f1,+f4]', '[-f2,+f3,+f4]', '[-f2,+f4]', '[-f1,+f3]', '[-f1,+f4]', '[+f4]'], 
+#         'd': ['[-f1,-f2,-f3,-f4]', '[-f2,-f1,-f3]', '[-f2,-f1,-f4]', '[-f1,-f4,-f3]', '[-f4,-f2,-f3]', '[-f4,-f1]', '[-f2,-f3]', '[-f2,-f4]']}
 
-fd2 = {'f1': {'name': 'f1', '+': {'a'}, '-': {'c', 'd'}}, 
-        'f2': {'name': 'f2', '+': {'b'}, '-': {'a', 'c', 'd'}}, 
-        'f3': {'name': 'f3', '+': {'a', 'c'}, '-': {'b', 'd'}}, 
-        'f4': {'name': 'f4', '+': {'c'}, '-': {'b', 'd'}}, }
+# fd2 = {'f1': {'name': 'f1', '+': {'a'}, '-': {'c', 'd'}}, 
+#         'f2': {'name': 'f2', '+': {'b'}, '-': {'a', 'c', 'd'}}, 
+#         'f3': {'name': 'f3', '+': {'a', 'c'}, '-': {'b', 'd'}}, 
+#         'f4': {'name': 'f4', '+': {'c'}, '-': {'b', 'd'}}, }
 
-find_best_tree(test, fd2)
+# test = {'a': ['[+f1, -f2]', '[+f1]'],
+#         'b': ['[-f1, -f2]', '[-f2]'],
+#         'c': ['[+f2]']}
 
+# fd2 = {'f1': {'name': 'f1', '+': {'a'}, '-': {'b'}},
+#        'f2': {'name': 'f2', '+': {'c'}, '-': {'a', 'b'}}}
+
+test = {'a': ['[+f1]'],
+        'b': ['[-f2]'],
+        'c': ['[+f3]']}
+
+fd2 = {'f1': {'name': 'f1', '+': {'a'}, '-': {'b', 'c'}},
+       'f2': {'name': 'f2', '+': {'c'}, '-': {'a'}},
+       'f3': {'name': 'f3', '+': {'b'}, '-': {'a', 'c'}}}
+
+find_best_tree(test, fd2) # (natural_classes_perphoneme, fd)
+print('\n-------------------------\n')
+for result in list_result:
+    print(result)
 # min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths = get_general_info_natural_classes(natural_classes_perphoneme, list(fd.keys()))
 
 # title = f'Count of minimal descriptions for various lengths \n({language} phonemic inventory with {inventoryfile} feature set)'
