@@ -181,128 +181,81 @@ def aux_plotting_function(values, title, xlabel, ylabel, path, xint):
     plt.savefig(path, bbox_inches='tight')
     plt.close() 
 
-def count_minimal_descriptions(tree, minimal_descriptions):
-    
-    count = 0
-    for phoneme in tree:
-        description = tree[phoneme]
-        stripped_descriptions = [set(item.strip("[]").split(',')) for item in minimal_descriptions[phoneme]]
-        if set(description) in stripped_descriptions:
-            count += 1
-    return count
-
-def concat_partial_trees(previous, current):
-    new = {}
-    for phoneme in previous:
-        new[phoneme] = list(set(previous[phoneme]) | set(current[phoneme]))
-    return new
-
 def are_all_lists_empty(dictionary):
-    for value in dictionary.values():
-        if value:  # if the list is not empty, it will be truthy
-            return False
-    return True
+    return not any(dictionary.values())
 
 def find_best_tree_recursive(partial_trees, idx, current_tree, minimal_descriptions, list_result):
-    if not are_all_lists_empty(current_tree):
-        list_result.append(current_tree)
+    if any(current_tree.values()):
+        list_result.append(current_tree.copy())
     
     for i in range(idx, len(partial_trees)):
         partial_tree = partial_trees[i]
-        new_tree = concat_partial_trees(current_tree, partial_tree)
+        new_tree = {phoneme: list(set(partial_tree[phoneme]).union(current_tree[phoneme])) for phoneme in partial_tree}
         find_best_tree_recursive(partial_trees, i + 1, new_tree, minimal_descriptions, list_result)
 
 
 def dicts_are_equal(dict1, dict2):
-    # Check if both dictionaries have the same keys
-    if dict1.keys() != dict2.keys():
-        return False
-    
-    # Check if the lists (as sets) are the same for each key
-    for key in dict1:
-        if set(dict1[key]) != set(dict2[key]):
-            return False
-            
-    return True
+    return dict1.keys() == dict2.keys() and all(set(dict1[key]) == set(dict2[key]) for key in dict1)
 
 def is_dict_in_list(dict_list, target_dict):
-    for d in dict_list:
-        if dicts_are_equal(d, target_dict):
-            return True
-    return False
+    return any(dicts_are_equal(d, target_dict) for d in dict_list)
 
-def find_best_tree(natural_classes_perphoneme, fd):
+def dict_to_tuple(d):
+    return tuple((k, frozenset(v)) for k, v in sorted(d.items()))
+
+def find_best_tree(minimal_descriptions_perphoneme, fd):
     """
     Find combinations of minimal feature descriptions that can form a tree together. That combination that has the most minimal descriptions 
     together will be the best tree. Those phonemes without any description yet can have any description that fits the tree (so no need to compute those)
     """
 
     print('\n-------------------------\n')
-    minimal_descriptions_perphoneme = {}
-    for phoneme, descriptions in natural_classes_perphoneme.items():
-        shortest = []
-        shortest_length = 0
-
-        for description in reversed(descriptions):
-            if not shortest: 
-                shortest.append(description)
-                shortest_length = len(description.strip("[]").split(','))
-            else:
-                if len(description.strip("[]").split(',')) == shortest_length:
-                    shortest.append(description)
-
-        minimal_descriptions_perphoneme[phoneme] = shortest
-
-    # print('\nsmallest_trees: ', len(minimal_descriptions_perphoneme), minimal_descriptions_perphoneme, '\n')
 
     # Get all partial trees
     partial_trees = []
-    for phoneme in minimal_descriptions_perphoneme:
-        
-        for description in minimal_descriptions_perphoneme[phoneme]:
+    unique_trees = set()
+    for phoneme, descriptions in minimal_descriptions_perphoneme.items():
+        for description in descriptions:
             partial_tree = {key: [] for key in minimal_descriptions_perphoneme}
-            # print('\ndescription: ', description, '\n')
-            description = description.strip("[]").split(',')
-            for feature in description:
-                feature = feature.strip('+')
-                feature = feature.strip('-')
-                phonemes_plus = fd[feature]['+']
-                phonemes_minus = fd[feature]['-']
-                for phoneme_plus in phonemes_plus:
+            features = [feature.strip().strip("+-") for feature in description.strip("[]").split(',')]
+
+            for feature in features:
+                for phoneme_plus in fd[feature]['+']:
                     if phoneme_plus in minimal_descriptions_perphoneme:
-                        partial_tree[phoneme_plus].append('+'+feature)
-                for phoneme_minus in phonemes_minus:
+                        partial_tree[phoneme_plus].append(f'+{feature}')
+                for phoneme_minus in fd[feature]['-']:
                     if phoneme_minus in minimal_descriptions_perphoneme:
-                        partial_tree[phoneme_minus].append('-'+feature)
+                        partial_tree[phoneme_minus].append(f'-{feature}')
 
             # only store unique trees
-            if not is_dict_in_list(partial_trees, partial_tree):
-                partial_trees.append(partial_tree)
+            partial_tree_tuple = dict_to_tuple(partial_tree)
 
-    # print('\npartial_trees: ', partial_trees, '\n')
+            if partial_tree_tuple not in unique_trees:
+                unique_trees.add(partial_tree_tuple)
+                partial_trees.append(partial_tree)
 
     list_result = []
     find_best_tree_recursive(partial_trees, 0, {key: [] for key in partial_trees[0]}, minimal_descriptions_perphoneme, list_result)
 
     best_trees = []
     best_count = 0
+    stripped_descriptions_perphoneme = {phoneme: [set(item.strip("[]").split(',')) for item in descriptions]
+            for phoneme, descriptions in minimal_descriptions_perphoneme.items()}
     for result in list_result:
         best = {}
+        count = 0
         for phoneme in result:
             description = result[phoneme]
-            stripped_descriptions = [set(item.strip("[]").split(',')) for item in minimal_descriptions_perphoneme[phoneme]]
-            if set(description) in stripped_descriptions:
+            if set(description) in stripped_descriptions_perphoneme[phoneme]:
                 best[phoneme] = description
+                count += 1
             else: best[phoneme] = []
         
-        count = count_minimal_descriptions(best, minimal_descriptions_perphoneme)
-
-        if not are_all_lists_empty(best):
-            if count > best_count:
-                best_count = count
-                best_trees = [best]  # Reset the list with the new best tree
-            elif count == best_count and not is_dict_in_list(best_trees, best):
-                best_trees.append(best)  # Append to the list if it has the same best count and is not a duplicate
+        if count > best_count:
+            best_count = count
+            best_trees = [best]  # Reset the list with the new best tree
+        elif count == best_count and not is_dict_in_list(best_trees, best):
+            best_trees.append(best)  # Append to the list if it has the same best count and is not a duplicate
 
     return best_trees
 
@@ -330,6 +283,7 @@ if len(sys.argv) == 3:
 
 print(allsegments)
 minimal_natural_classes = []
+minimal_natural_classes_perphoneme = {}
 natural_classes = []
 natural_classes_perphoneme = {}
 for testset in allsegments:
@@ -380,38 +334,42 @@ for testset in allsegments:
             for s in solutions[minsol]:
                 print(s)
                 minimal_natural_classes.append(s)
+                if list(testset)[0] in minimal_natural_classes_perphoneme:
+                    minimal_natural_classes_perphoneme[list(testset)[0]].append(s)
+                else: 
+                    minimal_natural_classes_perphoneme[list(testset)[0]] = []
             print("Trying greedy search")
             greedy(fd, feats, modes, base)
         else:
             # the given phoneme does not have a feature description that distinguishes it from all the other phonemes (i.e. does not have a natural class)
             print("Set is not a natural class")
 
-# test = {'a': ['[+f1,-f2,+f3]', '[-f2,+f3,+f1]', '[-f2,+f1]', '[-f2,+f3]', '[-f1,+f3]', '[+f1]'], 
-#         'b': ['[+f2,-f3,-f4]', '[-f3,+f2]', '[-f4,+f2]', '[-f4,-f3]', '[+f2]'],
-#         'c': ['[-f1,-f2,+f3,+f4]', '[-f2,-f1,+f3]', '[-f2,-f1,+f4]', '[-f2,+f3,+f4]', '[-f2,+f4]', '[-f1,+f3]', '[-f1,+f4]', '[+f4]'], 
-#         'd': ['[-f1,-f2,-f3,-f4]', '[-f2,-f1,-f3]', '[-f2,-f1,-f4]', '[-f1,-f4,-f3]', '[-f4,-f2,-f3]', '[-f4,-f1]', '[-f2,-f3]', '[-f2,-f4]']}
+# test = {'a': ['[+f1]'], # '[+f1,-f2,+f3]', '[-f2,+f3,+f1]', '[-f2,+f1]', '[-f2,+f3]', '[-f1,+f3]', 
+#         'b': ['[+f2]'], # '[+f2,-f3,-f4]', '[-f3,+f2]', '[-f4,+f2]', '[-f4,-f3]', 
+#         'c': ['[+f4]'], # '[-f1,-f2,+f3,+f4]', '[-f2,-f1,+f3]', '[-f2,-f1,+f4]', '[-f2,+f3,+f4]', '[-f2,+f4]', '[-f1,+f3]', '[-f1,+f4]', 
+#         'd': ['[-f4,-f1]', '[-f2,-f3]', '[-f2,-f4]']} # '[-f1,-f2,-f3,-f4]', '[-f2,-f1,-f3]', '[-f2,-f1,-f4]', '[-f1,-f4,-f3]', '[-f4,-f2,-f3]', 
 
 # fd2 = {'f1': {'name': 'f1', '+': {'a'}, '-': {'c', 'd'}}, 
 #         'f2': {'name': 'f2', '+': {'b'}, '-': {'a', 'c', 'd'}}, 
 #         'f3': {'name': 'f3', '+': {'a', 'c'}, '-': {'b', 'd'}}, 
 #         'f4': {'name': 'f4', '+': {'c'}, '-': {'b', 'd'}}, }
 
-# test = {'a': ['[+f1, -f2]', '[+f1]'],
-#         'b': ['[-f1, -f2]', '[-f2]'],
+# test = {'a': ['[+f1]'], # '[+f1, -f2]', 
+#         'b': ['[-f2]'], # '[-f1, -f2]', 
 #         'c': ['[+f2]']}
 
 # fd2 = {'f1': {'name': 'f1', '+': {'a'}, '-': {'b'}},
 #        'f2': {'name': 'f2', '+': {'c'}, '-': {'a', 'b'}}}
 
-# test = {'a': ['[+f1]'],
-#         'b': ['[+f3]'],
-#         'c': ['[+f2]']}
+test = {'a': ['[+f1]'],
+        'b': ['[+f3]'],
+        'c': ['[+f2]']}
 
-# fd2 = {'f1': {'name': 'f1', '+': {'a'}, '-': {'b', 'c'}},
-#        'f2': {'name': 'f2', '+': {'c'}, '-': {'a'}},
-#        'f3': {'name': 'f3', '+': {'b'}, '-': {'a', 'c'}}}
+fd2 = {'f1': {'name': 'f1', '+': {'a'}, '-': {'b', 'c'}},
+       'f2': {'name': 'f2', '+': {'c'}, '-': {'a'}},
+       'f3': {'name': 'f3', '+': {'b'}, '-': {'a', 'c'}}}
 
-list_result = find_best_tree(natural_classes_perphoneme, fd) # (test, fd2)
+list_result = find_best_tree(test, fd2) #(minimal_natural_classes_perphoneme, fd)
 print('\n-------------------------\n')
 for result in list_result:
     print(result)
