@@ -1,6 +1,7 @@
 import sys
-import matplotlib.pyplot as plt
-import os
+import pandas as pd
+from tqdm import tqdm
+import json
 
 def readinventory(filename):
     """Read phoneme inventory and store in a dictionary."""
@@ -99,8 +100,8 @@ def greedy(fd, basefeats, basemodes, correct):
     print("Greedy solution:", bestfeatures)
 
 def get_general_info_natural_classes(natural_classes, keys):
-    if not os.path.exists(f'{language}_perphoneme_{inventoryfile}'):
-        os.makedirs(f'{language}_perphoneme_{inventoryfile}')
+    # if not os.path.exists(f'{language}_perphoneme_{inventoryfile}'):
+    #     os.makedirs(f'{language}_perphoneme_{inventoryfile}')
 
     min_lengths = {} # store the length of the minimal description where each feature is included
     min_lengths_phonemes = {}
@@ -131,7 +132,7 @@ def get_general_info_natural_classes(natural_classes, keys):
             else: 
                 min_lengths_phonemes[phoneme] = len(sublist)
         
-        aux_plotting_function(min_lengths, f"Phoneme {phoneme}", 'Feature', 'Length minimal feature description', f'{language}_perphoneme_{inventoryfile}/{phoneme}.jpg', False)
+        # aux_plotting_function(min_lengths, f"Phoneme {phoneme}", 'Feature', 'Length minimal feature description', f'{language}_perphoneme_{inventoryfile}/{phoneme}.jpg', False)
                 
     avg_lengths = {k: v[0] / v[1] if v[1] != 0 else 0 for k, v in avg_lengths.items()}
 
@@ -165,21 +166,6 @@ def get_general_info_natural_classes(natural_classes, keys):
                 count_lengths[len(sublist)] = 1
     
     return min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths
-
-def aux_plotting_function(values, title, xlabel, ylabel, path, xint):
-    values = dict(sorted(values.items(), key=lambda item: item[1]))
-    classes = list(values.keys())
-    counts = list(values.values())
-
-    # Plot the histogram
-    plt.bar(classes, counts, width=0.8)
-    plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    if xint: plt.locator_params(axis="x", integer=True)
-    else: plt.xticks(rotation=90)
-    plt.savefig(path, bbox_inches='tight')
-    plt.close() 
 
 def are_all_lists_empty(dictionary):
     return not any(dictionary.values())
@@ -261,9 +247,10 @@ def find_best_tree(minimal_descriptions_perphoneme, fd):
 
 ##############################################################################
 
-if len(sys.argv) < 2:
-    print("Usage: " + sys.argv[0] + " [-v] inventoryfile phonemeset")
+if len(sys.argv) < 1:
+    print("Usage: " + sys.argv[0] + " [-v] inventoryfile")
     quit()
+
 
 verbose = False
 i = 1
@@ -271,131 +258,80 @@ if sys.argv[1] == '-v':
     verbose = True
     i += 1
 
-inventoryfile = sys.argv[i]
+inventoryfile = sys.argv[1]
 fd, allsegments = readinventory(inventoryfile)
+df = pd.read_csv('pb_languages_formatted.csv')
+all_languages = {}
+for index, row in tqdm(df.iterrows()):
+    language = row['language'].replace("/", " or ")
+    family = row['family']
+    inventory = row['core inventory']
+    inventory = inventory.strip("[]").split(',')
+    inventory = [feature.strip().replace("'", "") for feature in inventory]
+    inventory = [feature for feature in inventory if feature != '']
+    allsegments = set(inventory)
 
-if len(sys.argv) == 3:
-    language = sys.argv[2]
-    with open(f"{language}.txt", "r") as file:
-        lines = file.readlines()
-    selected_segments = [line.strip() for line in lines]
-    allsegments = set(selected_segments)
+    minimal_natural_classes = []
+    minimal_natural_classes_perphoneme = {}
+    natural_classes = []
+    natural_classes_perphoneme = {}
+    for testset in tqdm(allsegments):
+        features = [f for f in fd]
+        base = allsegments
+        feats, modes = [], [] # list with featres, list with signs for each feature
+        testset = {testset}
+        # print("\nCalculating C for phoneme set " + str(testset))
 
-minimal_natural_classes = []
-minimal_natural_classes_perphoneme = {}
-natural_classes = []
-natural_classes_perphoneme = {}
-print(allsegments)
-for testset in allsegments:
-    print(testset)
-    features = [f for f in fd]
-    base = allsegments
-    feats, modes = [], [] # list with featres, list with signs for each feature
-    testset = set(testset)
-    print("Calculating C for phoneme set " + "{" + ','.join(testset) + "}")
+        # Iterate over all features to find:
+            # base: list of phonemes that are described by the same features as the given test phoneme
+            # feats: list of features that describe the given phoneme
+            # modes: list with the respective signs of the features describing the given phoneme
+        for feat in features:
+            if testset <= fd[feat]['+']: # test whether testset is a subset of fd[feat]['+']
+                # fd[feat]['+']: set of phonemes that have the feature feat with sign + 
+                base = base & fd[feat]['+'] # returns intersection between the two sets (those elements that are in both sets)
+                # print("+" + fd[feat]['name'], end=' ')
+                feats.append(feat)
+                modes.append('+')
+            elif testset <= fd[feat]['-']:
+                # fd[feat]['-']: set of phonemes that have the feature feat with sign - 
+                base = base & fd[feat]['-']
+                # print("-" + fd[feat]['name'], end=' ')
+                feats.append(feat)
+                modes.append('-')
+        # print()
 
-    # Iterate over all features to find:
-        # base: list of phonemes that are described by the same features as the given test phoneme
-        # feats: list of features that describe the given phoneme
-        # modes: list with the respective signs of the features describing the given phoneme
-    for feat in features:
-        if testset <= fd[feat]['+']: # test whether testset is a subset of fd[feat]['+']
-            # fd[feat]['+']: set of phonemes that have the feature feat with sign + 
-            base = base & fd[feat]['+'] # returns intersection between the two sets (those elements that are in both sets)
-            print("+" + fd[feat]['name'], end=' ')
-            feats.append(feat)
-            modes.append('+')
-        elif testset <= fd[feat]['-']:
-            # fd[feat]['-']: set of phonemes that have the feature feat with sign - 
-            base = base & fd[feat]['-']
-            print("-" + fd[feat]['name'], end=' ')
-            feats.append(feat)
-            modes.append('-')
-    print()
-
-    solutions = {}
-    with open(f'natural_classes_{inventoryfile}_{language}.txt', 'a') as file:
+        solutions = {}
+        # with open(f'natural_classes_{inventoryfile}_{language}.txt', 'a') as file:
+        #     file.write(f"\nPhoneme: {base}")
         if base == testset: # check if the procedure above has resulted in the phoneme being tested (i.e. we have the correct general feature description and it is a natural class)
-            file.write(f"\nPhoneme: {base}")
-            print("Set is a natural class")
-            print("Trying branch-and-bound")
+            # file.write(f"\nPhoneme: {base}")
+            # print("Set is a natural class")
             maxlen = len(feats)
             reccheck(fd, feats, modes, [], [], base, 0)
             for s in solutions.values():
                 for a in s:
                     # Writing text
-                    file.write(f"\n{a}")
+                    # file.write(f"\n{a}")
                     natural_classes.append(a) 
                     if list(testset)[0] in natural_classes_perphoneme:
                         natural_classes_perphoneme[list(testset)[0]].append(a)
                     else: 
                         natural_classes_perphoneme[list(testset)[0]] = []
             minsol = min(solutions.keys())
-            print("Minimal solution(s):")
             for s in solutions[minsol]:
-                print(s)
                 minimal_natural_classes.append(s)
                 if list(testset)[0] in minimal_natural_classes_perphoneme:
                     minimal_natural_classes_perphoneme[list(testset)[0]].append(s)
                 else: 
                     minimal_natural_classes_perphoneme[list(testset)[0]] = []
-            print("Trying greedy search")
-            greedy(fd, feats, modes, base)
-        else:
-            # the given phoneme does not have a feature description that distinguishes it from all the other phonemes (i.e. does not have a natural class)
-            print("Set is not a natural class")
+            # else:
+                # the given phoneme does not have a feature description that distinguishes it from all the other phonemes (i.e. does not form a natural class)
+                # print("Set is not a natural class")
 
-# test = {'a': ['[+f1]'], # '[+f1,-f2,+f3]', '[-f2,+f3,+f1]', '[-f2,+f1]', '[-f2,+f3]', '[-f1,+f3]', 
-#         'b': ['[+f2]'], # '[+f2,-f3,-f4]', '[-f3,+f2]', '[-f4,+f2]', '[-f4,-f3]', 
-#         'c': ['[+f4]'], # '[-f1,-f2,+f3,+f4]', '[-f2,-f1,+f3]', '[-f2,-f1,+f4]', '[-f2,+f3,+f4]', '[-f2,+f4]', '[-f1,+f3]', '[-f1,+f4]', 
-#         'd': ['[-f4,-f1]', '[-f2,-f3]', '[-f2,-f4]']} # '[-f1,-f2,-f3,-f4]', '[-f2,-f1,-f3]', '[-f2,-f1,-f4]', '[-f1,-f4,-f3]', '[-f4,-f2,-f3]', 
+    min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths = get_general_info_natural_classes(natural_classes_perphoneme, list(fd.keys()))
+    all_languages[language] = {'min_lengths': min_lengths, 'min_descriptions': min_descriptions, 
+                                'count_phoneme': count_phoneme, 'avg_lengths': avg_lengths, 'count_lengths': count_lengths}
 
-# fd2 = {'f1': {'name': 'f1', '+': {'a'}, '-': {'c', 'd'}}, 
-#         'f2': {'name': 'f2', '+': {'b'}, '-': {'a', 'c', 'd'}}, 
-#         'f3': {'name': 'f3', '+': {'a', 'c'}, '-': {'b', 'd'}}, 
-#         'f4': {'name': 'f4', '+': {'c'}, '-': {'b', 'd'}}, }
-
-# test = {'a': ['[+f1]'], # '[+f1, -f2]', 
-#         'b': ['[-f2]'], # '[-f1, -f2]', 
-#         'c': ['[+f2]']}
-
-# fd2 = {'f1': {'name': 'f1', '+': {'a'}, '-': {'b'}},
-#        'f2': {'name': 'f2', '+': {'c'}, '-': {'a', 'b'}}}
-
-test = {'a': ['[+f1]'],
-        'b': ['[+f3]'],
-        'c': ['[+f2]']}
-
-fd2 = {'f1': {'name': 'f1', '+': {'a'}, '-': {'b', 'c'}},
-       'f2': {'name': 'f2', '+': {'c'}, '-': {'a'}},
-       'f3': {'name': 'f3', '+': {'b'}, '-': {'a', 'c'}}}
-
-list_result = find_best_tree(test, fd2) #(minimal_natural_classes_perphoneme, fd)
-print('\n-------------------------\n')
-for result in list_result:
-    print(result)
-
-# min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths = get_general_info_natural_classes(natural_classes_perphoneme, list(fd.keys()))
-
-# title = f'Count of minimal descriptions for various lengths \n({language} phonemic inventory with {inventoryfile} feature set)'
-# path = f'countminimaldescription.jpg'
-# aux_plotting_function(count_lengths, title, 'Length', 'Count', path, True)
-
-# total_sum = sum(count_lengths.values())
-# normalized_lengths = {key: value / total_sum for key, value in count_lengths.items()}
-
-# title = f'Normalized count of minimal descriptions for various lengths \n({language} phonemic inventory with {inventoryfile} feature set)'
-# path = f'normalizedcountminimaldescription.jpg'
-# aux_plotting_function(normalized_lengths, title, 'Length', 'Normalized count', path, True)
-
-# title = f'The number of times the feature is included in the minimal description of a phoneme\n({language} phonemic inventory with {inventoryfile} feature set)'
-# path = f'countphonemesperfeature.jpg'
-# aux_plotting_function(count_phoneme, title, 'Feature', 'Count', path, False)
-
-# title = f'Length of minimal feature description\n({language} phonemic inventory with {inventoryfile} feature set)'
-# path = f'minfeatureimportance.jpg'
-# aux_plotting_function(min_lengths, title, 'Feature', 'Length', path, False)
-
-# title = f'Average length of feature description\n({language} phonemic inventory with {inventoryfile} feature set)'
-# path = f'avgfeatureimportance.jpg'
-# aux_plotting_function(avg_lengths, title, 'Feature', 'Average length', path, False)
+with open(f'data_all_languages_{inventoryfile}.json', 'w') as file:
+    json.dump(all_languages, file)
