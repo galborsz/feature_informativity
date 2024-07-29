@@ -1,36 +1,31 @@
-# Distinctive Feature Minimization
+# Quantification of Feature Informativity 
 
-This code implements a few search strategies discussed in the empirical section of the paper "The Computational Complexity of Distinctive Feature Minimization in Phonology" (Chen and Hulden, 2018) for finding the minimal set of distinctive features that captures some set of phonemes.
+This code extends the work by [Chen and Hulden](https://github.com/mhulden/minphonfeat), , which verifies whether a set of phonemes forms a natural class. It employs two algorithms: Branch & Bound and Greedy Search. According to Chen and Hulden, the Greedy Search algorithm does not guarantee finding the correct minimal feature descriptions. Therefore, the results of the Branch & Bound algorithm are used to quantify feature informativity. This algorithm exhaustively explores all combinations of features that describe a given phoneme and verifies if that phoneme is a natural class (i.e., if it is the only phoneme described by that combination of features).
+
+Each phoneme forming a natural class is stored in a dictionary along with all its possible feature descriptions. Additionally, some descriptive measurements (such as the length of the minimal feature descriptions, the average length of feature descriptions, etc.) are stored in this dictionary.
+
+Two different scripts can be found in the repository: `featureinfo_alllanguages.py` and `featureinfo_selectlanguages.py`. The former generates a dictionary for a dataset containing the phonemic inventory of 629 languages and three feature systems (namely the binary-valued systems of Halle & Clements (HC), Sound Pattern of English (SPE), and Jakobson, Fant, and Halle (JFH)).
 
 Usage:
 
 ```
-python3 featuremin.py inventory.txt phonemelisting [-v]
+python3 featureinfo_alllanguages.py inventory
 ```
-
 For example:
 
 ```
-python3 featuremin.py testinventory2.txt b,g
+python3 featureinfo_alllanguages.py HC_features
 ```
 
-would find the minimal specification for the phoneme set {b,g} using two different strategies: (1) exhaustive search, which is guaranteed to find all the minimal solutions, and (2) greedy search, which returns a single solution (if one exists), which is not guaranteed to be minimal.
+The latter script generates a dictionary for the given language and feature system.
 
-The feature inventory is a text file in a text-based self-explanatory format. Included are two inventories discussed in the paper, a simple toy inventory (`testinventory2.txt`) and an inventory for English following Hayes (2011) (`testinventory1.txt`)
-
-The phonemes are given by listing them in the last argument.
-
-# Cite
+Usage:
 
 ```
-@InProceedings{chenhulden2018,
-  author    = {Chen, Hubie and Hulden, Mans},
-  title     = {The Computational Complexity of Distinctive Feature Minimization in Phonology},
-  booktitle = {Proceedings of the 2018 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, Volume 2 (Short Papers)},
-  year      = {2018},
-  publisher = {Association for Computational Linguistics},
-  pages     = {542--547},
-  location  = {New Orleans, Louisiana},
-  url       = {http://aclweb.org/anthology/N18-2086}
-}
+python3 featureinfo_selectlanguages.py inventory language
+```
+For example:
+
+```
+python3 featureinfo_selectlanguages.py riggle chinese
 ```
