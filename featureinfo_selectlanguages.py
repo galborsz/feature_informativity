@@ -240,36 +240,33 @@ for testset in allsegments:
     print()
 
     solutions = {}
-    with open(f'natural_classes_{inventoryfile}_{language}.txt', 'a') as file:
-        if base == testset: # check if the procedure above has resulted in the phoneme being tested (i.e. we have the correct general feature description and it is a natural class)
-            file.write(f"\nPhoneme: {base}")
-            print("Set is a natural class")
-            print("Trying branch-and-bound")
-            maxlen = len(feats)
-            reccheck(fd, feats, modes, [], [], base, 0)
-            for s in solutions.values():
-                for a in s:
-                    # Writing text
-                    file.write(f"\n{a}")
-                    natural_classes.append(a) 
-                    if list(testset)[0] in natural_classes_perphoneme:
-                        natural_classes_perphoneme[list(testset)[0]].append(a)
-                    else: 
-                        natural_classes_perphoneme[list(testset)[0]] = []
-            minsol = min(solutions.keys())
-            print("Minimal solution(s):")
-            for s in solutions[minsol]:
-                print(s)
-                minimal_natural_classes.append(s)
-                if list(testset)[0] in minimal_natural_classes_perphoneme:
-                    minimal_natural_classes_perphoneme[list(testset)[0]].append(s)
+    # Check if the procedure above has resulted in the phoneme being tested (i.e. we have the correct general feature description and it is a natural class)
+    if base == testset: 
+        print("Set is a natural class")
+        print("Trying branch-and-bound")
+        maxlen = len(feats)
+        reccheck(fd, feats, modes, [], [], base, 0)
+        for s in solutions.values():
+            for a in s:
+                natural_classes.append(a) 
+                if list(testset)[0] in natural_classes_perphoneme:
+                    natural_classes_perphoneme[list(testset)[0]].append(a)
                 else: 
-                    minimal_natural_classes_perphoneme[list(testset)[0]] = []
-            print("Trying greedy search")
-            greedy(fd, feats, modes, base)
-        else:
-            # the given phoneme does not have a feature description that distinguishes it from all the other phonemes (i.e. does not have a natural class)
-            print("Set is not a natural class")
+                    natural_classes_perphoneme[list(testset)[0]] = []
+        minsol = min(solutions.keys())
+        print("Minimal solution(s):")
+        for s in solutions[minsol]:
+            print(s)
+            minimal_natural_classes.append(s)
+            if list(testset)[0] in minimal_natural_classes_perphoneme:
+                minimal_natural_classes_perphoneme[list(testset)[0]].append(s)
+            else: 
+                minimal_natural_classes_perphoneme[list(testset)[0]] = []
+        print("Trying greedy search")
+        greedy(fd, feats, modes, base)
+    else:
+        # The given phoneme does not have a feature description that distinguishes it from all the other phonemes (i.e. does not have a natural class)
+        print("Set is not a natural class")
 
 min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths = get_general_info_natural_classes(natural_classes_perphoneme, list(fd.keys()))
 all_info = {'min_lengths': min_lengths, 'min_descriptions': min_descriptions, 

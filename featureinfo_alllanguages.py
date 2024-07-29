@@ -2,6 +2,8 @@ import sys
 import pandas as pd
 from tqdm import tqdm
 import json
+import os
+import matplotlib.pyplot as plt
 
 def readinventory(filename):
     """Read phoneme inventory and store in a dictionary."""
@@ -100,8 +102,8 @@ def greedy(fd, basefeats, basemodes, correct):
     print("Greedy solution:", bestfeatures)
 
 def get_general_info_natural_classes(natural_classes, keys):
-    # if not os.path.exists(f'{language}_perphoneme_{inventoryfile}'):
-    #     os.makedirs(f'{language}_perphoneme_{inventoryfile}')
+    if not os.path.exists(f'{language}_perphoneme_{inventoryfile}'):
+        os.makedirs(f'{language}_perphoneme_{inventoryfile}')
 
     min_lengths = {} # store the length of the minimal description where each feature is included
     min_lengths_phonemes = {}
@@ -132,7 +134,7 @@ def get_general_info_natural_classes(natural_classes, keys):
             else: 
                 min_lengths_phonemes[phoneme] = len(sublist)
         
-        # aux_plotting_function(min_lengths, f"Phoneme {phoneme}", 'Feature', 'Length minimal feature description', f'{language}_perphoneme_{inventoryfile}/{phoneme}.jpg', False)
+        aux_plotting_function(min_lengths, f"Phoneme {phoneme}", 'Feature', 'Length minimal feature description', f'{language}_perphoneme_{inventoryfile}/{phoneme}.jpg', False)
                 
     avg_lengths = {k: v[0] / v[1] if v[1] != 0 else 0 for k, v in avg_lengths.items()}
 
@@ -167,83 +169,21 @@ def get_general_info_natural_classes(natural_classes, keys):
     
     return min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths
 
-def are_all_lists_empty(dictionary):
-    return not any(dictionary.values())
+def aux_plotting_function(values, title, xlabel, ylabel, path, xint):
+    """Plot the given variables."""
+    values = dict(sorted(values.items(), key=lambda item: item[1]))
+    classes = list(values.keys())
+    counts = list(values.values())
 
-def find_best_tree_recursive(partial_trees, idx, current_tree, minimal_descriptions, list_result):
-    if any(current_tree.values()):
-        list_result.append(current_tree.copy())
-    
-    for i in range(idx, len(partial_trees)):
-        partial_tree = partial_trees[i]
-        new_tree = {phoneme: list(set(partial_tree[phoneme]).union(current_tree[phoneme])) for phoneme in partial_tree}
-        find_best_tree_recursive(partial_trees, i + 1, new_tree, minimal_descriptions, list_result)
-
-
-def dicts_are_equal(dict1, dict2):
-    return dict1.keys() == dict2.keys() and all(set(dict1[key]) == set(dict2[key]) for key in dict1)
-
-def is_dict_in_list(dict_list, target_dict):
-    return any(dicts_are_equal(d, target_dict) for d in dict_list)
-
-def dict_to_tuple(d):
-    return tuple((k, frozenset(v)) for k, v in sorted(d.items()))
-
-def find_best_tree(minimal_descriptions_perphoneme, fd):
-    """
-    Find combinations of minimal feature descriptions that can form a tree together. That combination that has the most minimal descriptions 
-    together will be the best tree. Those phonemes without any description yet can have any description that fits the tree (so no need to compute those)
-    """
-
-    print('\n-------------------------\n')
-
-    # Get all partial trees
-    partial_trees = []
-    unique_trees = set()
-    for phoneme, descriptions in minimal_descriptions_perphoneme.items():
-        for description in descriptions:
-            partial_tree = {key: [] for key in minimal_descriptions_perphoneme}
-            features = [feature.strip().strip("+-") for feature in description.strip("[]").split(',')]
-
-            for feature in features:
-                for phoneme_plus in fd[feature]['+']:
-                    if phoneme_plus in minimal_descriptions_perphoneme:
-                        partial_tree[phoneme_plus].append(f'+{feature}')
-                for phoneme_minus in fd[feature]['-']:
-                    if phoneme_minus in minimal_descriptions_perphoneme:
-                        partial_tree[phoneme_minus].append(f'-{feature}')
-
-            # only store unique trees
-            partial_tree_tuple = dict_to_tuple(partial_tree)
-
-            if partial_tree_tuple not in unique_trees:
-                unique_trees.add(partial_tree_tuple)
-                partial_trees.append(partial_tree)
-
-    list_result = []
-    find_best_tree_recursive(partial_trees, 0, {key: [] for key in partial_trees[0]}, minimal_descriptions_perphoneme, list_result)
-
-    best_trees = []
-    best_count = 0
-    stripped_descriptions_perphoneme = {phoneme: [set(item.strip("[]").split(',')) for item in descriptions]
-            for phoneme, descriptions in minimal_descriptions_perphoneme.items()}
-    for result in list_result:
-        best = {}
-        count = 0
-        for phoneme in result:
-            description = result[phoneme]
-            if set(description) in stripped_descriptions_perphoneme[phoneme]:
-                best[phoneme] = description
-                count += 1
-            else: best[phoneme] = []
-        
-        if count > best_count:
-            best_count = count
-            best_trees = [best]  # Reset the list with the new best tree
-        elif count == best_count and not is_dict_in_list(best_trees, best):
-            best_trees.append(best)  # Append to the list if it has the same best count and is not a duplicate
-
-    return best_trees
+    # Plot the histogram
+    plt.bar(classes, counts, width=0.8)
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    if xint: plt.locator_params(axis="x", integer=True)
+    else: plt.xticks(rotation=90)
+    plt.savefig(path, bbox_inches='tight')
+    plt.close()
 
 ##############################################################################
 
@@ -280,7 +220,6 @@ for index, row in tqdm(df.iterrows()):
         base = allsegments
         feats, modes = [], [] # list with featres, list with signs for each feature
         testset = {testset}
-        # print("\nCalculating C for phoneme set " + str(testset))
 
         # Iterate over all features to find:
             # base: list of phonemes that are described by the same features as the given test phoneme
@@ -290,29 +229,21 @@ for index, row in tqdm(df.iterrows()):
             if testset <= fd[feat]['+']: # test whether testset is a subset of fd[feat]['+']
                 # fd[feat]['+']: set of phonemes that have the feature feat with sign + 
                 base = base & fd[feat]['+'] # returns intersection between the two sets (those elements that are in both sets)
-                # print("+" + fd[feat]['name'], end=' ')
                 feats.append(feat)
                 modes.append('+')
             elif testset <= fd[feat]['-']:
                 # fd[feat]['-']: set of phonemes that have the feature feat with sign - 
                 base = base & fd[feat]['-']
-                # print("-" + fd[feat]['name'], end=' ')
                 feats.append(feat)
                 modes.append('-')
-        # print()
 
         solutions = {}
-        # with open(f'natural_classes_{inventoryfile}_{language}.txt', 'a') as file:
-        #     file.write(f"\nPhoneme: {base}")
-        if base == testset: # check if the procedure above has resulted in the phoneme being tested (i.e. we have the correct general feature description and it is a natural class)
-            # file.write(f"\nPhoneme: {base}")
-            # print("Set is a natural class")
+        # Check if the procedure above has resulted in the phoneme being tested (i.e. we have the correct general feature description and it is a natural class)
+        if base == testset: 
             maxlen = len(feats)
             reccheck(fd, feats, modes, [], [], base, 0)
             for s in solutions.values():
                 for a in s:
-                    # Writing text
-                    # file.write(f"\n{a}")
                     natural_classes.append(a) 
                     if list(testset)[0] in natural_classes_perphoneme:
                         natural_classes_perphoneme[list(testset)[0]].append(a)
@@ -325,9 +256,6 @@ for index, row in tqdm(df.iterrows()):
                     minimal_natural_classes_perphoneme[list(testset)[0]].append(s)
                 else: 
                     minimal_natural_classes_perphoneme[list(testset)[0]] = []
-            # else:
-                # the given phoneme does not have a feature description that distinguishes it from all the other phonemes (i.e. does not form a natural class)
-                # print("Set is not a natural class")
 
     min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths = get_general_info_natural_classes(natural_classes_perphoneme, list(fd.keys()))
     all_languages[language] = {'min_lengths': min_lengths, 'min_descriptions': min_descriptions, 
