@@ -201,7 +201,7 @@ fd, allsegments = readinventory(inventoryfile)
 
 if len(sys.argv) == 3:
     language = sys.argv[2]
-    with open(f"{language}.txt", "r") as file:
+    with open(f"phonemic_inventories/{language}.txt", "r") as file:
         lines = file.readlines()
     selected_segments = [line.strip() for line in lines]
     allsegments = set(selected_segments)

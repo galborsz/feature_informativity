@@ -200,7 +200,7 @@ if sys.argv[1] == '-v':
 
 inventoryfile = sys.argv[1]
 fd, allsegments = readinventory(inventoryfile)
-df = pd.read_csv('pb_languages_formatted.csv')
+df = pd.read_csv('phonemic_inventories/pb_languages_formatted.csv')
 all_languages = {}
 for index, row in tqdm(df.iterrows()):
     language = row['language'].replace("/", " or ")
