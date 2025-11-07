@@ -102,8 +102,7 @@ def greedy(fd, basefeats, basemodes, correct):
     print("Greedy solution:", bestfeatures)
 
 def get_general_info_natural_classes(natural_classes, keys):
-    if not os.path.exists(f'{language}_perphoneme_{inventoryfile}'):
-        os.makedirs(f'{language}_perphoneme_{inventoryfile}')
+    """Get descriptive information for the given natural classes"""
 
     min_lengths = {} # store the length of the minimal description where each feature is included
     min_lengths_phonemes = {}
@@ -133,9 +132,7 @@ def get_general_info_natural_classes(natural_classes, keys):
                 min_lengths_phonemes[phoneme] = min(min_lengths_phonemes[phoneme], len(sublist))
             else: 
                 min_lengths_phonemes[phoneme] = len(sublist)
-        
-        aux_plotting_function(min_lengths, f"Phoneme {phoneme}", 'Feature', 'Length minimal feature description', f'{language}_perphoneme_{inventoryfile}/{phoneme}.jpg', False)
-                
+                        
     avg_lengths = {k: v[0] / v[1] if v[1] != 0 else 0 for k, v in avg_lengths.items()}
 
     min_descriptions = {} # store the minimal descriptions of each phoneme
@@ -169,22 +166,6 @@ def get_general_info_natural_classes(natural_classes, keys):
     
     return min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths
 
-def aux_plotting_function(values, title, xlabel, ylabel, path, xint):
-    """Plot the given variables."""
-    values = dict(sorted(values.items(), key=lambda item: item[1]))
-    classes = list(values.keys())
-    counts = list(values.values())
-
-    # Plot the histogram
-    plt.bar(classes, counts, width=0.8)
-    plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    if xint: plt.locator_params(axis="x", integer=True)
-    else: plt.xticks(rotation=90)
-    plt.savefig(path, bbox_inches='tight')
-    plt.close()
-
 ##############################################################################
 
 if len(sys.argv) < 1:
@@ -199,24 +180,25 @@ if sys.argv[1] == '-v':
     i += 1
 
 inventoryfile = sys.argv[1]
-fd, allsegments = readinventory(inventoryfile)
+fd, allsegments = readinventory(inventoryfile) # feature dictionary
 df = pd.read_csv('phonemic_inventories/pb_languages_formatted.csv')
 all_languages = {}
-for index, row in tqdm(df.iterrows()):
+for index, row in tqdm(df.iterrows()): # iterate through all languages in the dataframe
     language = row['language'].replace("/", " or ")
     family = row['family']
     inventory = row['core inventory']
     inventory = inventory.strip("[]").split(',')
     inventory = [feature.strip().replace("'", "") for feature in inventory]
     inventory = [feature for feature in inventory if feature != '']
-    allsegments = set(inventory)
+    allsegments = set(inventory) # set of all phonemes in the inventory
 
     minimal_natural_classes = []
     minimal_natural_classes_perphoneme = {}
     natural_classes = []
     natural_classes_perphoneme = {}
-    for testset in tqdm(allsegments):
-        features = [f for f in fd]
+    for testset in tqdm(allsegments): # iterate through all phonemes in the inventory
+        print("Testing phoneme:", type(testset))
+        features = [f for f in fd] # list of all features in the selected feature system
         base = allsegments
         feats, modes = [], [] # list with featres, list with signs for each feature
         testset = {testset}
@@ -237,9 +219,11 @@ for index, row in tqdm(df.iterrows()):
                 feats.append(feat)
                 modes.append('-')
 
+        print(f'base: {base}, testset: {testset}')
         solutions = {}
         # Check if the procedure above has resulted in the phoneme being tested (i.e. we have the correct general feature description and it is a natural class)
         if base == testset: 
+            print('True')
             maxlen = len(feats)
             reccheck(fd, feats, modes, [], [], base, 0)
             for s in solutions.values():
@@ -251,15 +235,18 @@ for index, row in tqdm(df.iterrows()):
                         natural_classes_perphoneme[list(testset)[0]] = []
             minsol = min(solutions.keys())
             for s in solutions[minsol]:
+                print(s)
                 minimal_natural_classes.append(s)
                 if list(testset)[0] in minimal_natural_classes_perphoneme:
                     minimal_natural_classes_perphoneme[list(testset)[0]].append(s)
                 else: 
                     minimal_natural_classes_perphoneme[list(testset)[0]] = []
-
+    print("minimal natural classes", minimal_natural_classes)
+    print("minimal natural classes per phoneme", minimal_natural_classes_perphoneme)
+    print("natural classes per phoneme", natural_classes_perphoneme)
     min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths = get_general_info_natural_classes(natural_classes_perphoneme, list(fd.keys()))
     all_languages[language] = {'min_lengths': min_lengths, 'min_descriptions': min_descriptions, 
                                 'count_phoneme': count_phoneme, 'avg_lengths': avg_lengths, 'count_lengths': count_lengths}
 
-with open(f'data_all_languages_{inventoryfile}.json', 'w') as file:
-    json.dump(all_languages, file)
+# with open(f'data_all_languages_{inventoryfile}.json', 'w') as file:
+#     json.dump(all_languages, file)
