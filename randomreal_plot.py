@@ -19,231 +19,322 @@ for inv in inventories:
         all_data[inv] = json.load(f)
 
 # Load pb_languages data
-pb_languages = pd.read_csv("pb_languages_formatted.csv")
+pb_languages = pd.read_csv("phonemic_inventories/pb_languages_formatted.csv")
 
-# Configuration
-NUM_SAMPLES = 1  # Number of random samples per language (matching Julia)
+# # Configuration
+# NUM_SAMPLES = 100  # Number of random samples per language (matching Julia)
 
-print("\n" + "=" * 60)
-print("Generating random samples and computing informativity...")
-print("=" * 60)
+# print("\n" + "-" * 60)
+# print("Generating random samples and computing informativity...")
+# print("-" * 60)
 
-# Step 1: Collect all unique phonemes from pb_languages_formatted.csv to create phoneme pool
-all_phonemes = set()
-for _, row in pb_languages.iterrows():
-    inventory_str = row["core inventory"]
-    # Parse the inventory string which is in Python list format: ['a', 'b', ...]
-    # Remove brackets and split by comma
-    inventory_str = inventory_str.strip('[]')
-    phonemes = [p.strip().strip('\'"') for p in inventory_str.split(',')]
-    for phoneme in phonemes:
-        if phoneme and phoneme != "":
-            all_phonemes.add(phoneme)
+# # Step 1: Collect all unique phonemes from pb_languages_formatted.csv to create phoneme pool
+# all_phonemes = set()
+# for _, row in pb_languages.iterrows():
+#     inventory_str = row["core inventory"]
+#     # Parse the inventory string which is in Python list format: ['a', 'b', ...]
+#     # Remove brackets and split by comma
+#     inventory_str = inventory_str.strip('[]')
+#     phonemes = [p.strip().strip('\'"') for p in inventory_str.split(',')]
+#     for phoneme in phonemes:
+#         if phoneme and phoneme != "":
+#             all_phonemes.add(phoneme)
 
-phoneme_pool = list(all_phonemes)
-print(f"Total unique phonemes in pool: {len(phoneme_pool)}")
+# phoneme_pool = list(all_phonemes)
+# print(f"Total unique phonemes in pool: {len(phoneme_pool)}")
 
-# Function to read feature inventory (matching Julia's readinventory)
-def readinventory(filename):
-    featdict = {}
-    allsegments = set()
-    
-    filepath = os.path.join("feature_sets", f"{filename}_features.txt")
-    with open(filepath, 'r') as f:
-        lines = [line.strip() for line in f.readlines()]
-    
-    fields = lines[0].split()
-    
-    for f in fields:
-        featdict[f] = {
-            "name": f,
-            "+": set(),
-            "-": set()
-        }
-    
-    for i in range(1, len(lines)):
-        thisline = lines[i]
-        if len(thisline) == 0:
-            continue
-        linefields = thisline.split()
-        if len(linefields) != len(fields) + 1:
-            print(f"Field length mismatch on line {i+1}")
-            exit()
-        phoneme = linefields[0]
-        allsegments.add(phoneme)
-        for j in range(1, len(linefields)):
-            if linefields[j] in ["+", "-"]:
-                featdict[fields[j-1]][linefields[j]].add(phoneme)
-    
-    return featdict, allsegments
+# def readinventory(filename):
+#     """Read phoneme inventory and store in a dictionary."""
+#     featdict = {}
+#     allsegments = set()
 
-# Function to store features for one solution (thread-safe version)
-def store_feats(solutions_dict, maxlen_ref, fd, feats, modes):
-    length_feats = len(feats)
-    if length_feats not in solutions_dict:
-        solutions_dict[length_feats] = []
-    thissol = []
-    for idx, feat in enumerate(feats):
-        thissol.append(modes[idx] + fd[feat]["name"])
-    solutions_dict[length_feats].append("[" + ",".join(thissol) + "]")
+#     lines = [line.strip() for line in open(f'feature_sets/{filename}_features.txt')]
+#     fields = lines[0].split()
+#     for f in fields:
+#         featdict[f] = {}
+#         featdict[f]['name'] = f # name of the feature
+#         featdict[f]['+'] = set() # phonemes with a + for that feature
+#         featdict[f]['-'] = set() # phonemes with a - for that feature
+#     for i in range(1, len(lines)):
+#         thisline = lines[i]
+#         if len(thisline) == 0:
+#             continue
+#         linefields = thisline.split()
+#         if len(linefields)!= len(fields) + 1 :
+#             print(f"Field length mismatch on line {i+1}")
+#             quit()
+#         phoneme = linefields[0]
+#         allsegments |= {phoneme}
+#         for j in range(1,len(linefields)):
+#             if linefields[j] == '+' or linefields[j] == '-':
+#                 featdict[fields[j-1]][linefields[j]] |= {phoneme}
 
-# Recursive function to check natural classes (thread-safe version)
-def reccheck(solutions_dict, maxlen_ref, fd, basefeats, basemodes, feats, modes, correct, baseindex, current_base):
-    if len(feats) > maxlen_ref[0]:
-        return
-    
-    # Check if current combination is a solution
-    if current_base == correct:
-        store_feats(solutions_dict, maxlen_ref, fd, feats, modes)
-        if len(feats) < maxlen_ref[0]:
-            maxlen_ref[0] = len(feats)
-    
-    numelem = len(basefeats)
-    for i in range(baseindex, numelem):
-        if basefeats[i] not in feats:
-            new_base = current_base.intersection(fd[basefeats[i]][basemodes[i]])
-            if new_base:
-                reccheck(solutions_dict, maxlen_ref, fd, basefeats, basemodes, 
-                        feats + [basefeats[i]], modes + [basemodes[i]], correct, i + 1, new_base)
+#     return featdict, allsegments
 
-# Process phoneme inventory and return natural classes per phoneme (thread-safe version)
-def process_phoneme_inventory(allsegments, fd, features):
-    natural_classes_perphoneme = {}
+# def reccheck(fd, basefeats, basemodes, feats, modes, correct, baseindex, current_base):
+#     """
+#     Start with an empty set of features and keep adding features one by one with different starting phonemes, generating all possible unique feature combinations.
+#     Check if the generated feature combinations are natural classes for the given phoneme.
     
-    for phoneme in allsegments:
-        testset = {phoneme}
-        base = allsegments.copy()
-        feats = []
-        modes = []
+#     Optimizations:
+#     - Pass current_base to avoid recalculating intersection each time
+#     - Use tuple for feats to enable hashing and memoization
+#     """
+
+#     def store_feats(fd, feats, modes):
+#         """Store features for one solution in dictionary indexed by length."""
+#         global solutions
+#         length = len(feats)
+#         if length not in solutions:
+#             solutions[length] = []
+#         thissol = []
+#         for idx, feat in enumerate(feats):
+#             thissol.append(modes[idx] + fd[feat]['name'])
+#         solutions[length].append('[' + ','.join(thissol) + ']')
         
-        # Find all features that describe this phoneme
-        for feat in features:
-            if testset.issubset(fd[feat]["+"]):
-                base = base.intersection(fd[feat]["+"])
-                feats.append(feat)
-                modes.append("+")
-            elif testset.issubset(fd[feat]["-"]):
-                base = base.intersection(fd[feat]["-"])
-                feats.append(feat)
-                modes.append("-")
-        
-        # Use local variables instead of global
-        local_solutions = {}
-        local_maxlen = [len(feats)]
-        
-        if base == testset:
-            reccheck(local_solutions, local_maxlen, fd, feats, modes, [], [], base, 0, allsegments)
-            
-            if phoneme not in natural_classes_perphoneme:
-                natural_classes_perphoneme[phoneme] = []
-            
-            for s in local_solutions.values():
-                natural_classes_perphoneme[phoneme].extend(s)
+#     global maxlen
+#     if len(feats) > maxlen: # Bound the search (max: total amount of features)
+#         return
     
-    return natural_classes_perphoneme
+#     # Check if current combination is a solution
+#     if current_base == correct: # New solution
+#         store_feats(fd, feats, modes) # if proposed feature combination is a natural class, store solution
+#         if len(feats) < maxlen:
+#             maxlen = len(feats)
+    
+#     numelem = len(basefeats)
+#     # This for loop iterates over all possible indeces and generates all possible feature combinations
+#     for i in range(baseindex, numelem):  # Add one feature
+#         if basefeats[i] not in feats:    # If we didn't add this already
+#             # Calculate new base once
+#             new_base = current_base & fd[basefeats[i]][basemodes[i]]
+#             if new_base:  # Only recurse if there are still phonemes in the set
+#                 reccheck(fd, basefeats, basemodes, feats + [basefeats[i]], modes + [basemodes[i]], correct, i + 1, new_base)
+#     return
 
-# Get descriptive information for natural classes
-def get_general_info_natural_classes(natural_classes, keys):
-    min_lengths = {}
-    min_lengths_phonemes = {}
-    avg_lengths = {key: [0, 0] for key in keys}
-    min_descriptions = {}
-    count_phoneme = {}
-    count_lengths = {}
-    
-    for phoneme, sublists in natural_classes.items():
-        parsed_sublists = []
-        for sublist in sublists:
-            parsed = [s.strip() for s in sublist.strip('[]').split(',')]
-            parsed_sublists.append(parsed)
+# def get_general_info_natural_classes(natural_classes, keys):
+#     """Get descriptive information for the given natural classes - Optimized"""
+
+#     min_lengths = {} # store the length of the minimal description where each feature is included
+#     min_lengths_phonemes = {}
+#     avg_lengths = {key: [0,0] for key in keys} # store the average lengths of all descriptions per feature
+#     min_descriptions = {} # store the minimal descriptions of each phoneme
+#     count_phoneme = {} # The number of times the feature is included in the minimal description of a phoneme
+#     count_lengths = {} # Count of minimal descriptions for various lengths
+
+#     for phoneme, sublists in natural_classes.items():
+#         # Pre-parse all sublists once
+#         parsed_sublists = []
+#         for sublist in sublists:
+#             parsed = sublist.strip("[]").split(',')
+#             parsed_sublists.append(parsed)
             
-            # Process features in this sublist
-            for value in parsed:
-                value = value.lstrip('+-')
+#             # Process features in this sublist
+#             for value in parsed:
+#                 value = value.strip('+-')  # Combined strip for efficiency
                 
-                # Update min_lengths
-                if value in min_lengths:
-                    min_lengths[value] = min(min_lengths[value], len(parsed))
-                else:
-                    min_lengths[value] = len(parsed)
+#                 # Update min_lengths
+#                 if value in min_lengths:
+#                     min_lengths[value] = min(min_lengths[value], len(parsed))
+#                 else:
+#                     min_lengths[value] = len(parsed)
+
+#                 # Update avg_lengths
+#                 if value in avg_lengths:
+#                     avg_lengths[value][0] += len(parsed)
+#                     avg_lengths[value][1] += 1
+            
+#             # Update min_lengths_phonemes
+#             if phoneme in min_lengths_phonemes:
+#                 min_lengths_phonemes[phoneme] = min(min_lengths_phonemes[phoneme], len(parsed))
+#             else: 
+#                 min_lengths_phonemes[phoneme] = len(parsed)
+        
+#         # Get minimal descriptions for this phoneme
+#         min_len = min_lengths_phonemes[phoneme]
+#         min_descriptions[phoneme] = [parsed for parsed in parsed_sublists if len(parsed) == min_len]
+        
+#         # Count features in minimal descriptions
+#         for sublist in min_descriptions[phoneme]:
+#             for value in sublist:
+#                 value = value.strip('+-')
+#                 count_phoneme[value] = count_phoneme.get(value, 0) + 1
+            
+#             sublist_len = len(sublist)
+#             count_lengths[sublist_len] = count_lengths.get(sublist_len, 0) + 1
+                        
+#     avg_lengths = {k: v[0] / v[1] if v[1] != 0 else 0 for k, v in avg_lengths.items()}
+    
+#     return min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths
+
+
+# def process_phoneme_inventory(allsegments, fd, features):
+#     """Process a phoneme inventory and return natural classes per phoneme."""
+#     natural_classes_perphoneme = {}
+#     global solutions, maxlen
+    
+#     for phoneme in allsegments:
+#         testset = {phoneme}
+#         base = allsegments
+#         feats, modes = [], []
+
+#         # Find all features that describe this phoneme
+#         for feat in features:
+#             if testset <= fd[feat]['+']:
+#                 base = base & fd[feat]['+']
+#                 feats.append(feat)
+#                 modes.append('+')
+#             elif testset <= fd[feat]['-']:
+#                 base = base & fd[feat]['-']
+#                 feats.append(feat)
+#                 modes.append('-')
+
+#         solutions = {}
+#         # Check if we have a valid natural class
+#         if base == testset: 
+#             maxlen = len(feats)
+#             reccheck(fd, feats, modes, [], [], base, 0, allsegments)
+            
+#             # Store only the solutions
+#             if phoneme not in natural_classes_perphoneme:
+#                 natural_classes_perphoneme[phoneme] = []
+            
+#             for s in solutions.values():
+#                 natural_classes_perphoneme[phoneme].extend(s)
+    
+#     return natural_classes_perphoneme
+
+# # Function to store features for one solution (thread-safe version)
+# def store_feats(solutions_dict, maxlen_ref, fd, feats, modes):
+#     length_feats = len(feats)
+#     if length_feats not in solutions_dict:
+#         solutions_dict[length_feats] = []
+#     thissol = []
+#     for idx, feat in enumerate(feats):
+#         thissol.append(modes[idx] + fd[feat]["name"])
+#     solutions_dict[length_feats].append("[" + ",".join(thissol) + "]")
+
+# # Function to compute weighted average MDL (matching Julia's compute_avg_mdl)
+# def compute_weighted_avg_mdl(allsegments, min_lengths, min_descriptions):
+#     """Compute average minimal description length for a set of phonemes."""
+#     total_avg_length = 0
+#     feature_count = 0
+    
+#     for phoneme in allsegments:
+#         if phoneme in min_descriptions:
+#             feature_descriptions = min_descriptions[phoneme]
+#             unique_features = {item.strip('+-') for sublist in feature_descriptions for item in sublist}
+#             for feature in unique_features:
+#                 if feature in min_lengths:
+#                     total_avg_length += min_lengths[feature]
+#                     feature_count += 1
+    
+#     if feature_count > 0:
+#         return total_avg_length / feature_count
+#     return None
+
+# # Function to compute random sample MDL (for parallel execution)
+# def compute_random_sample_mdl(inventory_size, phoneme_pool, featdict, features):
+#     # Randomly sample phonemes from the pool
+#     sampled_phonemes = set(random.sample(phoneme_pool, inventory_size))
+
+#     # Compute natural classes for the sampled phonemes
+#     natural_classes = process_phoneme_inventory(sampled_phonemes, featdict, features)
+    
+#     # Get informativity information
+#     sample_min_lengths, sample_min_descriptions, _, _, _ = get_general_info_natural_classes(natural_classes, features)
+
+#     random_avg_mdl = compute_weighted_avg_mdl(sampled_phonemes, sample_min_lengths, sample_min_descriptions)
+    
+#     if random_avg_mdl:
+#         return random_avg_mdl
+            
+#     return None
+
+# # Collect average MDL per language for each inventory (using simple mean like Plot 2)
+# weighted_avg_mdl = {inv: {"Real": [], "Random": []} for inv in inventories}
+
+# print(f"\nUsing ThreadPoolExecutor for parallel processing")
+
+# # Process each inventory
+# for inv in inventories:
+#     print(f"\nProcessing inventory: {inv}")
+    
+#     # Read the feature dictionary for this inventory
+#     featdict, all_segments_inv = readinventory(inv)
+#     features = list(featdict.keys())
+    
+#     lang_count = 0
+    
+#     for language, lang_data in all_data[inv].items():
+#         min_lengths = lang_data["min_lengths"]
+#         min_descriptions = lang_data["min_descriptions"]
+        
+#         # Get the actual phoneme inventory from pb_languages_formatted.csv
+#         lang_rows = pb_languages[pb_languages['language'] == language]
+#         if lang_rows.empty:
+#             continue  # Skip if language not found in CSV
+        
+#         inventory_str = lang_rows.iloc[0]["core inventory"]
+#         # Parse the inventory string which is in Python list format: ['a', 'b', ...]
+#         inventory_str = inventory_str.strip('[]')
+#         allsegments_list = [p.strip().strip('\'"') for p in inventory_str.split(',')]
+#         allsegments = {p for p in allsegments_list if p and p != ""}
+#         inventory_size = len(allsegments)
+        
+#         # Compute real average using simple mean (same as Plot 2)
+#         if min_lengths:
+#             mdl_values_lang = list(min_lengths.values())
+#             real_avg_mdl = np.mean(mdl_values_lang)
+#             weighted_avg_mdl[inv]["Real"].append(real_avg_mdl)
+#             lang_count += 1
+            
+#             # Generate NUM_SAMPLES random inventories and compute their average MDL in parallel
+#             with ThreadPoolExecutor(max_workers=4) as executor:
+#                 futures = []
+#                 for sample_num in range(NUM_SAMPLES):
+#                     future = executor.submit(compute_random_sample_mdl, 
+#                                            inventory_size, phoneme_pool, featdict, features)
+#                     futures.append(future)
                 
-                # Update avg_lengths
-                if value in avg_lengths:
-                    avg_lengths[value][0] += len(parsed)
-                    avg_lengths[value][1] += 1
-            
-            # Update min_lengths_phonemes
-            if phoneme in min_lengths_phonemes:
-                min_lengths_phonemes[phoneme] = min(min_lengths_phonemes[phoneme], len(parsed))
-            else:
-                min_lengths_phonemes[phoneme] = len(parsed)
-        
-        # Get minimal descriptions for this phoneme
-        min_len = min_lengths_phonemes[phoneme]
-        min_descriptions[phoneme] = [parsed for parsed in parsed_sublists if len(parsed) == min_len]
-        
-        # Count features in minimal descriptions
-        for sublist in min_descriptions[phoneme]:
-            for value in sublist:
-                value = value.lstrip('+-')
-                count_phoneme[value] = count_phoneme.get(value, 0) + 1
-            
-            sublist_len = len(sublist)
-            count_lengths[sublist_len] = count_lengths.get(sublist_len, 0) + 1
-    
-    avg_lengths = {k: v[0] / v[1] for k, v in avg_lengths.items() if v[1] != 0}
-    
-    return min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths
+#                 sample_avg_mdls = []
+#                 for future in as_completed(futures):
+#                     result = future.result()
+#                     if result is not None:
+#                         sample_avg_mdls.append(result)
 
-# Function to compute weighted average MDL (matching Julia's compute_avg_mdl)
-def compute_weighted_avg_mdl(allsegments, min_lengths, min_descriptions):
-    total_avg_length = 0.0
-    feature_count = 0
-    
-    for phoneme in allsegments:
-        if phoneme in min_descriptions:
-            feature_descriptions = min_descriptions[phoneme]
+#             # sample_avg_mdls = []
+#             # for sample_num in range(NUM_SAMPLES):
+#             #     sample_mdl = compute_random_sample_mdl(inventory_size, phoneme_pool, featdict, features)
+#             #     if sample_mdl is not None:
+#             #         sample_avg_mdls.append(sample_mdl)
             
-            # Get unique features: flatten all sublists and strip +/-
-            unique_features = set()
-            for sublist in feature_descriptions:
-                for item in sublist:
-                    feature_name = item.lstrip('+-')
-                    unique_features.add(feature_name)
+#             # Compute mean of random samples
+#             if sample_avg_mdls:
+#                 mean_random_mdl = np.mean(sample_avg_mdls)
+#                 weighted_avg_mdl[inv]["Random"].append(mean_random_mdl)
             
-            # Add MDL for each unique feature
-            for feature in unique_features:
-                if feature in min_lengths:
-                    total_avg_length += min_lengths[feature]
-                    feature_count += 1
+#             if lang_count % 10 == 0:
+#                 print(f"  Processed {lang_count} languages...")
     
-    if feature_count > 0:
-        return total_avg_length / feature_count
-    return None
+#     print(f"  Processed {lang_count} languages")
+#     print(f"  Real samples: {len(weighted_avg_mdl[inv]['Real'])}")
+#     print(f"  Random samples: {len(weighted_avg_mdl[inv]['Random'])}")
 
-# Function to compute simple average MDL (same as Plot 2 approach)
-def compute_simple_avg_mdl(min_lengths):
-    if min_lengths:
-        mdl_values = list(min_lengths.values())
-        return np.mean(mdl_values)
-    return None
+# # Save weighted_avg_mdl to JSON file
+# output_filename = "weighted_avg_mdl_data.json"
+# with open(output_filename, 'w') as f:
+#     json.dump(weighted_avg_mdl, f, indent=4)
+# print(f"\nweighted_avg_mdl data saved to {output_filename}")
 
-# Function to compute random sample MDL (for parallel execution)
-def compute_random_sample_mdl(inventory_size, phoneme_pool, featdict, features):
-    # Randomly sample phonemes from the pool
-    sampled_phonemes = set(random.sample(phoneme_pool, min(inventory_size, len(phoneme_pool))))
-    
-    # Compute natural classes for the sampled phonemes
-    natural_classes = process_phoneme_inventory(sampled_phonemes, featdict, features)
-    
-    # Get informativity information
-    sample_min_lengths, _, _, _, _ = get_general_info_natural_classes(natural_classes, features)
-    
-    # Compute simple mean of MDL values for this random sample
-    if sample_min_lengths:
-        mdl_values_sample = list(sample_min_lengths.values())
-        return np.mean(mdl_values_sample)
-    return None
+# Load weighted_avg_mdl data from JSON file
+input_filename = "weighted_avg_mdl_data.json"
+if os.path.exists(input_filename):
+    with open(input_filename, 'r') as f:
+        weighted_avg_mdl = json.load(f)
+    print(f"\nLoaded weighted_avg_mdl data from {input_filename}")
+else:
+    print(f"\nWarning: {input_filename} not found, using computed data")
 
 # Helper function to count frequencies (equivalent to Julia's count_frequencies)
 def count_frequencies(values, bin_edges):
@@ -257,76 +348,6 @@ def count_frequencies(values, bin_edges):
                 counts[i] += 1
                 break
     return counts
-
-# Collect average MDL per language for each inventory (using simple mean like Plot 2)
-weighted_avg_mdl = {inv: {"Real": [], "Random": []} for inv in inventories}
-
-print(f"\nUsing ThreadPoolExecutor for parallel processing")
-
-# Process each inventory
-for inv in inventories:
-    print(f"\nProcessing inventory: {inv}")
-    
-    # Read the feature dictionary for this inventory
-    featdict, all_segments_inv = readinventory(inv)
-    features = list(featdict.keys())
-    
-    lang_count = 0
-    
-    for language, lang_data in all_data[inv].items():
-        min_lengths = lang_data["min_lengths"]
-        min_descriptions = lang_data["min_descriptions"]
-        
-        # Get the actual phoneme inventory from pb_languages_formatted.csv
-        lang_rows = pb_languages[pb_languages['language'] == language]
-        if lang_rows.empty:
-            continue  # Skip if language not found in CSV
-        
-        inventory_str = lang_rows.iloc[0]["core inventory"]
-        # Parse the inventory string which is in Python list format: ['a', 'b', ...]
-        inventory_str = inventory_str.strip('[]')
-        allsegments_list = [p.strip().strip('\'"') for p in inventory_str.split(',')]
-        allsegments = {p for p in allsegments_list if p and p != ""}
-        inventory_size = len(allsegments)
-        
-        # Compute real average using simple mean (same as Plot 2)
-        if min_lengths:
-            mdl_values_lang = list(min_lengths.values())
-            real_avg_mdl = np.mean(mdl_values_lang)
-            weighted_avg_mdl[inv]["Real"].append(real_avg_mdl)
-            lang_count += 1
-            
-            # Generate NUM_SAMPLES random inventories and compute their average MDL in parallel
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                futures = []
-                for sample_num in range(NUM_SAMPLES):
-                    future = executor.submit(compute_random_sample_mdl, 
-                                           inventory_size, phoneme_pool, featdict, features)
-                    futures.append(future)
-                
-                sample_avg_mdls = []
-                for future in as_completed(futures):
-                    result = future.result()
-                    if result is not None:
-                        sample_avg_mdls.append(result)
-            
-            # Compute mean of random samples
-            if sample_avg_mdls:
-                mean_random_mdl = np.mean(sample_avg_mdls)
-                weighted_avg_mdl[inv]["Random"].append(mean_random_mdl)
-            
-            if lang_count % 10 == 0:
-                print(f"  Processed {lang_count} languages...")
-    
-    print(f"  Processed {lang_count} languages")
-    print(f"  Real samples: {len(weighted_avg_mdl[inv]['Real'])}")
-    print(f"  Random samples: {len(weighted_avg_mdl[inv]['Random'])}")
-
-# Save weighted_avg_mdl to JSON file
-output_filename = "weighted_avg_mdl_data.json"
-with open(output_filename, 'w') as f:
-    json.dump(weighted_avg_mdl, f, indent=4)
-print(f"\nweighted_avg_mdl data saved to {output_filename}")
 
 # Create bar plots for each inventory
 for inv in inventories:
@@ -363,7 +384,7 @@ for inv in inventories:
                    color=color_real, label='Real', edgecolor=color_real, linewidth=1.5)
             
             if weighted_avg_mdl[inv]["Random"]:
-                plt.bar(x_vals, random_counts, width=bin_width, alpha=0.5,
+                plt.bar(x_vals, random_counts, width=bin_width, alpha=0.6,
                        color=color_random, label='Random', edgecolor=color_random, linewidth=1.5)
             
             # Add vertical lines for medians
@@ -402,9 +423,9 @@ for inv in inventories:
 # PLOT 3 DENSITY VERSION: Individual inventory density plots with Real and Random
 # ============================================================
 
-print("\n" + "=" * 60)
+print("\n" + "-" * 60)
 print("Creating density plot versions of Plot 3...")
-print("=" * 60)
+print("-" * 60)
 
 # Create individual density plots for each inventory
 for inv in inventories:
@@ -421,28 +442,22 @@ for inv in inventories:
         # Create density plot
         plt.figure(figsize=(12, 8))
         
-        # Add Real data density
+        # Add Real data density (KDE only, no histogram)
         if weighted_avg_mdl[inv]["Real"]:
-            plt.hist(weighted_avg_mdl[inv]["Real"], bins=30, density=True, alpha=0.4,
-                    color=color_real, label='Real', edgecolor=color_real, linewidth=1.5)
-            
-            # Add KDE for smoother density
             from scipy.stats import gaussian_kde
             kde_real = gaussian_kde(weighted_avg_mdl[inv]["Real"])
             x_range = np.linspace(min(weighted_avg_mdl[inv]["Real"]), 
                                 max(weighted_avg_mdl[inv]["Real"]), 100)
-            plt.plot(x_range, kde_real(x_range), color=color_real, linewidth=2.5)
+            plt.plot(x_range, kde_real(x_range), color=color_real, linewidth=2.5, label='Real')
+            plt.fill_between(x_range, kde_real(x_range), alpha=0.4, color=color_real)
         
-        # Add Random data density
+        # Add Random data density (KDE only, no histogram)
         if weighted_avg_mdl[inv]["Random"]:
-            plt.hist(weighted_avg_mdl[inv]["Random"], bins=30, density=True, alpha=0.3,
-                    color=color_random, label='Random', edgecolor=color_random, linewidth=1.5)
-            
-            # Add KDE for smoother density
             kde_random = gaussian_kde(weighted_avg_mdl[inv]["Random"])
             x_range_random = np.linspace(min(weighted_avg_mdl[inv]["Random"]), 
                                        max(weighted_avg_mdl[inv]["Random"]), 100)
-            plt.plot(x_range_random, kde_random(x_range_random), color=color_random, linewidth=2.5)
+            plt.plot(x_range_random, kde_random(x_range_random), color=color_random, linewidth=2.5, label='Random')
+            plt.fill_between(x_range_random, kde_random(x_range_random), alpha=0.3, color=color_random)
         
         # Add vertical lines for medians
         if weighted_avg_mdl[inv]["Real"]:
@@ -497,4 +512,161 @@ for inv in inventories:
         
         print(f"\nDensity plot saved as mdl_distribution_{inv}_density.png")
 
+print("\n" + "-" * 60)
+print("Creating violin plot comparing all three feature systems...")
+print("-" * 60)
+
+# Create violin plot comparing Real distributions across all three feature systems
+fig, ax = plt.subplots(figsize=(12, 8))
+
+# Prepare data for violin plot
+violin_data = [weighted_avg_mdl[inv]["Real"] for inv in inventories]
+
+# Create violin plot
+positions = [1, 2, 3]
+parts = ax.violinplot(violin_data, positions=positions, widths=0.7, showmeans=False, showmedians=False)
+
+# Color the violin plots
+for i, pc in enumerate(parts['bodies']):
+    pc.set_facecolor(colors[i])
+    pc.set_alpha(0.6)
+    pc.set_edgecolor(colors[i])
+    pc.set_linewidth(1.5)
+
+# Color other parts
+for partname in ('cbars', 'cmins', 'cmaxes'):
+    if partname in parts:
+        vp = parts[partname]
+        vp.set_edgecolor(colors[i])
+        vp.set_linewidth(1.5)
+
+# Add median lines
+for i, inv in enumerate(inventories):
+    median_val = np.median(weighted_avg_mdl[inv]["Real"])
+    ax.plot([positions[i] - 0.2, positions[i] + 0.2], [median_val, median_val], 
+            color=colors[i], linewidth=2)
+
+# Set up x-axis
+ax.set_xticks(positions)
+ax.set_xticklabels(inventories)
+ax.set_xlabel('Feature System', fontsize=14)
+ax.set_ylabel('Average Minimal Description Length', fontsize=14)
+ax.set_title('Real Language Distributions by Feature System', fontsize=16)
+ax.grid(True, axis='y', alpha=0.3)
+
+# Calculate statistics and add significance brackets
+from scipy.stats import mannwhitneyu
+
+def get_stars(p_value):
+    if p_value < 0.001:
+        return "***"
+    elif p_value < 0.01:
+        return "**"
+    elif p_value < 0.05:
+        return "*"
+    else:
+        return None
+
+def rank_biserial_unpaired(x, y):
+    scores = []
+    for xi in x:
+        for yj in y:
+            if xi > yj:
+                scores.append(1.0)
+            elif xi == yj:
+                scores.append(0.5)
+            else:
+                scores.append(0.0)
+    A = np.mean(scores)
+    return 2 * A - 1  # in [-1,1]
+
+# Find max y value for positioning brackets
+max_y = max([max(weighted_avg_mdl[inv]["Real"]) for inv in inventories])
+data_range = max_y - min([min(weighted_avg_mdl[inv]["Real"]) for inv in inventories])
+bracket_spacing = data_range * 0.08
+tick_height = data_range * 0.02
+
+# Test 1: HC vs SPE
+stat_hc_spe, p_hc_spe = mannwhitneyu(weighted_avg_mdl["HC"]["Real"], 
+                                     weighted_avg_mdl["SPE"]["Real"], 
+                                     alternative='two-sided')
+r_hc_spe = rank_biserial_unpaired(weighted_avg_mdl["HC"]["Real"], 
+                                  weighted_avg_mdl["SPE"]["Real"])
+stars_hc_spe = get_stars(p_hc_spe)
+
+if stars_hc_spe:
+    y_bracket_1 = max_y + bracket_spacing
+    ax.plot([positions[0], positions[1]], [y_bracket_1, y_bracket_1], 
+            color='black', linewidth=2)
+    ax.plot([positions[0], positions[0]], [y_bracket_1 - tick_height, y_bracket_1 + tick_height], 
+            color='black', linewidth=2)
+    ax.plot([positions[1], positions[1]], [y_bracket_1 - tick_height, y_bracket_1 + tick_height], 
+            color='black', linewidth=2)
+    ax.text((positions[0] + positions[1]) / 2, y_bracket_1 + 0.05, stars_hc_spe, 
+            ha='center', fontsize=14, fontweight='bold')
+
+print(f"\nMann-Whitney U test - HC vs SPE:")
+print(f"  p-value = {p_hc_spe:.4g}")
+print(f"  effect size (rank-biserial) = {r_hc_spe:.3f}")
+print(f"  significance: {stars_hc_spe}")
+
+# Test 2: SPE vs JFH
+stat_spe_jfh, p_spe_jfh = mannwhitneyu(weighted_avg_mdl["SPE"]["Real"], 
+                                       weighted_avg_mdl["JFH"]["Real"], 
+                                       alternative='two-sided')
+r_spe_jfh = rank_biserial_unpaired(weighted_avg_mdl["SPE"]["Real"], 
+                                   weighted_avg_mdl["JFH"]["Real"])
+stars_spe_jfh = get_stars(p_spe_jfh)
+
+y_bracket_2 = max_y + 2 * bracket_spacing
+ax.plot([positions[1], positions[2]], [y_bracket_2, y_bracket_2], 
+        color='black', linewidth=2)
+ax.plot([positions[1], positions[1]], [y_bracket_2 - tick_height, y_bracket_2 + tick_height], 
+        color='black', linewidth=2)
+ax.plot([positions[2], positions[2]], [y_bracket_2 - tick_height, y_bracket_2 + tick_height], 
+        color='black', linewidth=2)
+ax.text((positions[1] + positions[2]) / 2, y_bracket_2 + 0.05, stars_spe_jfh, 
+        ha='center', fontsize=14, fontweight='bold')
+
+print(f"\nMann-Whitney U test - SPE vs JFH:")
+print(f"  p-value = {p_spe_jfh:.4g}")
+print(f"  effect size (rank-biserial) = {r_spe_jfh:.3f}")
+print(f"  significance: {stars_spe_jfh}")
+
+# Test 3: HC vs JFH
+stat_hc_jfh, p_hc_jfh = mannwhitneyu(weighted_avg_mdl["HC"]["Real"], 
+                                     weighted_avg_mdl["JFH"]["Real"], 
+                                     alternative='two-sided')
+r_hc_jfh = rank_biserial_unpaired(weighted_avg_mdl["HC"]["Real"], 
+                                  weighted_avg_mdl["JFH"]["Real"])
+stars_hc_jfh = get_stars(p_hc_jfh)
+
+y_bracket_3 = max_y + 3 * bracket_spacing
+ax.plot([positions[0], positions[2]], [y_bracket_3, y_bracket_3], 
+        color='black', linewidth=2)
+ax.plot([positions[0], positions[0]], [y_bracket_3 - tick_height, y_bracket_3 + tick_height], 
+        color='black', linewidth=2)
+ax.plot([positions[2], positions[2]], [y_bracket_3 - tick_height, y_bracket_3 + tick_height], 
+        color='black', linewidth=2)
+ax.text((positions[0] + positions[2]) / 2, y_bracket_3 + 0.05, stars_hc_jfh, 
+        ha='center', fontsize=14, fontweight='bold')
+
+print(f"\nMann-Whitney U test - HC vs JFH:")
+print(f"  p-value = {p_hc_jfh:.4g}")
+print(f"  effect size (rank-biserial) = {r_hc_jfh:.3f}")
+print(f"  significance: {stars_hc_jfh}")
+
+# Set y-axis limits to accommodate brackets
+y_lower = min([min(weighted_avg_mdl[inv]["Real"]) for inv in inventories]) - data_range * 0.05
+y_upper = max_y + 4 * bracket_spacing + data_range * 0.08
+ax.set_ylim(y_lower, y_upper)
+
+ax.tick_params(labelsize=12)
+plt.tight_layout()
+plt.savefig("real_distributions_violin.png", dpi=300, bbox_inches='tight')
+plt.close()
+
+print(f"\nViolin plot saved as real_distributions_violin.png")
+
 print("\n✓ All plots created successfully!")
+
