@@ -2,10 +2,10 @@ import matplotlib.pyplot as plt
 import json
 import numpy as np
 import pandas as pd
-from scipy.stats import mannwhitneyu
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
+from statsmodels.stats.multitest import multipletests
 
 # Define inventories
 inventories = ["HC", "SPE", "JFH"]
@@ -21,320 +21,320 @@ for inv in inventories:
 # Load pb_languages data
 pb_languages = pd.read_csv("phonemic_inventories/pb_languages_formatted.csv")
 
-# # Configuration
-# NUM_SAMPLES = 100  # Number of random samples per language (matching Julia)
+# Configuration
+NUM_SAMPLES = 1000  # Number of random samples per language (matching Julia)
 
-# print("\n" + "-" * 60)
-# print("Generating random samples and computing informativity...")
-# print("-" * 60)
+print("\n" + "-" * 60)
+print("Generating random samples and computing informativity...")
+print("-" * 60)
 
-# # Step 1: Collect all unique phonemes from pb_languages_formatted.csv to create phoneme pool
-# all_phonemes = set()
-# for _, row in pb_languages.iterrows():
-#     inventory_str = row["core inventory"]
-#     # Parse the inventory string which is in Python list format: ['a', 'b', ...]
-#     # Remove brackets and split by comma
-#     inventory_str = inventory_str.strip('[]')
-#     phonemes = [p.strip().strip('\'"') for p in inventory_str.split(',')]
-#     for phoneme in phonemes:
-#         if phoneme and phoneme != "":
-#             all_phonemes.add(phoneme)
+# Step 1: Collect all unique phonemes from pb_languages_formatted.csv to create phoneme pool
+all_phonemes = set()
+for _, row in pb_languages.iterrows():
+    inventory_str = row["core inventory"]
+    # Parse the inventory string which is in Python list format: ['a', 'b', ...]
+    # Remove brackets and split by comma
+    inventory_str = inventory_str.strip('[]')
+    phonemes = [p.strip().strip('\'"') for p in inventory_str.split(',')]
+    for phoneme in phonemes:
+        if phoneme and phoneme != "":
+            all_phonemes.add(phoneme)
 
-# phoneme_pool = list(all_phonemes)
-# print(f"Total unique phonemes in pool: {len(phoneme_pool)}")
+phoneme_pool = list(all_phonemes)
+print(f"Total unique phonemes in pool: {len(phoneme_pool)}")
 
-# def readinventory(filename):
-#     """Read phoneme inventory and store in a dictionary."""
-#     featdict = {}
-#     allsegments = set()
+def readinventory(filename):
+    """Read phoneme inventory and store in a dictionary."""
+    featdict = {}
+    allsegments = set()
 
-#     lines = [line.strip() for line in open(f'feature_sets/{filename}_features.txt')]
-#     fields = lines[0].split()
-#     for f in fields:
-#         featdict[f] = {}
-#         featdict[f]['name'] = f # name of the feature
-#         featdict[f]['+'] = set() # phonemes with a + for that feature
-#         featdict[f]['-'] = set() # phonemes with a - for that feature
-#     for i in range(1, len(lines)):
-#         thisline = lines[i]
-#         if len(thisline) == 0:
-#             continue
-#         linefields = thisline.split()
-#         if len(linefields)!= len(fields) + 1 :
-#             print(f"Field length mismatch on line {i+1}")
-#             quit()
-#         phoneme = linefields[0]
-#         allsegments |= {phoneme}
-#         for j in range(1,len(linefields)):
-#             if linefields[j] == '+' or linefields[j] == '-':
-#                 featdict[fields[j-1]][linefields[j]] |= {phoneme}
+    lines = [line.strip() for line in open(f'feature_sets/{filename}_features.txt')]
+    fields = lines[0].split()
+    for f in fields:
+        featdict[f] = {}
+        featdict[f]['name'] = f # name of the feature
+        featdict[f]['+'] = set() # phonemes with a + for that feature
+        featdict[f]['-'] = set() # phonemes with a - for that feature
+    for i in range(1, len(lines)):
+        thisline = lines[i]
+        if len(thisline) == 0:
+            continue
+        linefields = thisline.split()
+        if len(linefields)!= len(fields) + 1 :
+            print(f"Field length mismatch on line {i+1}")
+            quit()
+        phoneme = linefields[0]
+        allsegments |= {phoneme}
+        for j in range(1,len(linefields)):
+            if linefields[j] == '+' or linefields[j] == '-':
+                featdict[fields[j-1]][linefields[j]] |= {phoneme}
 
-#     return featdict, allsegments
+    return featdict, allsegments
 
-# def reccheck(fd, basefeats, basemodes, feats, modes, correct, baseindex, current_base):
-#     """
-#     Start with an empty set of features and keep adding features one by one with different starting phonemes, generating all possible unique feature combinations.
-#     Check if the generated feature combinations are natural classes for the given phoneme.
+def reccheck(fd, basefeats, basemodes, feats, modes, correct, baseindex, current_base):
+    """
+    Start with an empty set of features and keep adding features one by one with different starting phonemes, generating all possible unique feature combinations.
+    Check if the generated feature combinations are natural classes for the given phoneme.
     
-#     Optimizations:
-#     - Pass current_base to avoid recalculating intersection each time
-#     - Use tuple for feats to enable hashing and memoization
-#     """
+    Optimizations:
+    - Pass current_base to avoid recalculating intersection each time
+    - Use tuple for feats to enable hashing and memoization
+    """
 
-#     def store_feats(fd, feats, modes):
-#         """Store features for one solution in dictionary indexed by length."""
-#         global solutions
-#         length = len(feats)
-#         if length not in solutions:
-#             solutions[length] = []
-#         thissol = []
-#         for idx, feat in enumerate(feats):
-#             thissol.append(modes[idx] + fd[feat]['name'])
-#         solutions[length].append('[' + ','.join(thissol) + ']')
+    def store_feats(fd, feats, modes):
+        """Store features for one solution in dictionary indexed by length."""
+        global solutions
+        length = len(feats)
+        if length not in solutions:
+            solutions[length] = []
+        thissol = []
+        for idx, feat in enumerate(feats):
+            thissol.append(modes[idx] + fd[feat]['name'])
+        solutions[length].append('[' + ','.join(thissol) + ']')
         
-#     global maxlen
-#     if len(feats) > maxlen: # Bound the search (max: total amount of features)
-#         return
+    global maxlen
+    if len(feats) > maxlen: # Bound the search (max: total amount of features)
+        return
     
-#     # Check if current combination is a solution
-#     if current_base == correct: # New solution
-#         store_feats(fd, feats, modes) # if proposed feature combination is a natural class, store solution
-#         if len(feats) < maxlen:
-#             maxlen = len(feats)
+    # Check if current combination is a solution
+    if current_base == correct: # New solution
+        store_feats(fd, feats, modes) # if proposed feature combination is a natural class, store solution
+        if len(feats) < maxlen:
+            maxlen = len(feats)
     
-#     numelem = len(basefeats)
-#     # This for loop iterates over all possible indeces and generates all possible feature combinations
-#     for i in range(baseindex, numelem):  # Add one feature
-#         if basefeats[i] not in feats:    # If we didn't add this already
-#             # Calculate new base once
-#             new_base = current_base & fd[basefeats[i]][basemodes[i]]
-#             if new_base:  # Only recurse if there are still phonemes in the set
-#                 reccheck(fd, basefeats, basemodes, feats + [basefeats[i]], modes + [basemodes[i]], correct, i + 1, new_base)
-#     return
+    numelem = len(basefeats)
+    # This for loop iterates over all possible indeces and generates all possible feature combinations
+    for i in range(baseindex, numelem):  # Add one feature
+        if basefeats[i] not in feats:    # If we didn't add this already
+            # Calculate new base once
+            new_base = current_base & fd[basefeats[i]][basemodes[i]]
+            if new_base:  # Only recurse if there are still phonemes in the set
+                reccheck(fd, basefeats, basemodes, feats + [basefeats[i]], modes + [basemodes[i]], correct, i + 1, new_base)
+    return
 
-# def get_general_info_natural_classes(natural_classes, keys):
-#     """Get descriptive information for the given natural classes - Optimized"""
+def get_general_info_natural_classes(natural_classes, keys):
+    """Get descriptive information for the given natural classes - Optimized"""
 
-#     min_lengths = {} # store the length of the minimal description where each feature is included
-#     min_lengths_phonemes = {}
-#     avg_lengths = {key: [0,0] for key in keys} # store the average lengths of all descriptions per feature
-#     min_descriptions = {} # store the minimal descriptions of each phoneme
-#     count_phoneme = {} # The number of times the feature is included in the minimal description of a phoneme
-#     count_lengths = {} # Count of minimal descriptions for various lengths
+    min_lengths = {} # store the length of the minimal description where each feature is included
+    min_lengths_phonemes = {}
+    avg_lengths = {key: [0,0] for key in keys} # store the average lengths of all descriptions per feature
+    min_descriptions = {} # store the minimal descriptions of each phoneme
+    count_phoneme = {} # The number of times the feature is included in the minimal description of a phoneme
+    count_lengths = {} # Count of minimal descriptions for various lengths
 
-#     for phoneme, sublists in natural_classes.items():
-#         # Pre-parse all sublists once
-#         parsed_sublists = []
-#         for sublist in sublists:
-#             parsed = sublist.strip("[]").split(',')
-#             parsed_sublists.append(parsed)
+    for phoneme, sublists in natural_classes.items():
+        # Pre-parse all sublists once
+        parsed_sublists = []
+        for sublist in sublists:
+            parsed = sublist.strip("[]").split(',')
+            parsed_sublists.append(parsed)
             
-#             # Process features in this sublist
-#             for value in parsed:
-#                 value = value.strip('+-')  # Combined strip for efficiency
+            # Process features in this sublist
+            for value in parsed:
+                value = value.strip('+-')  # Combined strip for efficiency
                 
-#                 # Update min_lengths
-#                 if value in min_lengths:
-#                     min_lengths[value] = min(min_lengths[value], len(parsed))
-#                 else:
-#                     min_lengths[value] = len(parsed)
+                # Update min_lengths
+                if value in min_lengths:
+                    min_lengths[value] = min(min_lengths[value], len(parsed))
+                else:
+                    min_lengths[value] = len(parsed)
 
-#                 # Update avg_lengths
-#                 if value in avg_lengths:
-#                     avg_lengths[value][0] += len(parsed)
-#                     avg_lengths[value][1] += 1
+                # Update avg_lengths
+                if value in avg_lengths:
+                    avg_lengths[value][0] += len(parsed)
+                    avg_lengths[value][1] += 1
             
-#             # Update min_lengths_phonemes
-#             if phoneme in min_lengths_phonemes:
-#                 min_lengths_phonemes[phoneme] = min(min_lengths_phonemes[phoneme], len(parsed))
-#             else: 
-#                 min_lengths_phonemes[phoneme] = len(parsed)
+            # Update min_lengths_phonemes
+            if phoneme in min_lengths_phonemes:
+                min_lengths_phonemes[phoneme] = min(min_lengths_phonemes[phoneme], len(parsed))
+            else: 
+                min_lengths_phonemes[phoneme] = len(parsed)
         
-#         # Get minimal descriptions for this phoneme
-#         min_len = min_lengths_phonemes[phoneme]
-#         min_descriptions[phoneme] = [parsed for parsed in parsed_sublists if len(parsed) == min_len]
+        # Get minimal descriptions for this phoneme
+        min_len = min_lengths_phonemes[phoneme]
+        min_descriptions[phoneme] = [parsed for parsed in parsed_sublists if len(parsed) == min_len]
         
-#         # Count features in minimal descriptions
-#         for sublist in min_descriptions[phoneme]:
-#             for value in sublist:
-#                 value = value.strip('+-')
-#                 count_phoneme[value] = count_phoneme.get(value, 0) + 1
+        # Count features in minimal descriptions
+        for sublist in min_descriptions[phoneme]:
+            for value in sublist:
+                value = value.strip('+-')
+                count_phoneme[value] = count_phoneme.get(value, 0) + 1
             
-#             sublist_len = len(sublist)
-#             count_lengths[sublist_len] = count_lengths.get(sublist_len, 0) + 1
+            sublist_len = len(sublist)
+            count_lengths[sublist_len] = count_lengths.get(sublist_len, 0) + 1
                         
-#     avg_lengths = {k: v[0] / v[1] if v[1] != 0 else 0 for k, v in avg_lengths.items()}
+    avg_lengths = {k: v[0] / v[1] if v[1] != 0 else 0 for k, v in avg_lengths.items()}
     
-#     return min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths
+    return min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths
 
 
-# def process_phoneme_inventory(allsegments, fd, features):
-#     """Process a phoneme inventory and return natural classes per phoneme."""
-#     natural_classes_perphoneme = {}
-#     global solutions, maxlen
+def process_phoneme_inventory(allsegments, fd, features):
+    """Process a phoneme inventory and return natural classes per phoneme."""
+    natural_classes_perphoneme = {}
+    global solutions, maxlen
     
-#     for phoneme in allsegments:
-#         testset = {phoneme}
-#         base = allsegments
-#         feats, modes = [], []
+    for phoneme in allsegments:
+        testset = {phoneme}
+        base = allsegments
+        feats, modes = [], []
 
-#         # Find all features that describe this phoneme
-#         for feat in features:
-#             if testset <= fd[feat]['+']:
-#                 base = base & fd[feat]['+']
-#                 feats.append(feat)
-#                 modes.append('+')
-#             elif testset <= fd[feat]['-']:
-#                 base = base & fd[feat]['-']
-#                 feats.append(feat)
-#                 modes.append('-')
+        # Find all features that describe this phoneme
+        for feat in features:
+            if testset <= fd[feat]['+']:
+                base = base & fd[feat]['+']
+                feats.append(feat)
+                modes.append('+')
+            elif testset <= fd[feat]['-']:
+                base = base & fd[feat]['-']
+                feats.append(feat)
+                modes.append('-')
 
-#         solutions = {}
-#         # Check if we have a valid natural class
-#         if base == testset: 
-#             maxlen = len(feats)
-#             reccheck(fd, feats, modes, [], [], base, 0, allsegments)
+        solutions = {}
+        # Check if we have a valid natural class
+        if base == testset: 
+            maxlen = len(feats)
+            reccheck(fd, feats, modes, [], [], base, 0, allsegments)
             
-#             # Store only the solutions
-#             if phoneme not in natural_classes_perphoneme:
-#                 natural_classes_perphoneme[phoneme] = []
+            # Store only the solutions
+            if phoneme not in natural_classes_perphoneme:
+                natural_classes_perphoneme[phoneme] = []
             
-#             for s in solutions.values():
-#                 natural_classes_perphoneme[phoneme].extend(s)
+            for s in solutions.values():
+                natural_classes_perphoneme[phoneme].extend(s)
     
-#     return natural_classes_perphoneme
+    return natural_classes_perphoneme
 
-# # Function to store features for one solution (thread-safe version)
-# def store_feats(solutions_dict, maxlen_ref, fd, feats, modes):
-#     length_feats = len(feats)
-#     if length_feats not in solutions_dict:
-#         solutions_dict[length_feats] = []
-#     thissol = []
-#     for idx, feat in enumerate(feats):
-#         thissol.append(modes[idx] + fd[feat]["name"])
-#     solutions_dict[length_feats].append("[" + ",".join(thissol) + "]")
+# Function to store features for one solution (thread-safe version)
+def store_feats(solutions_dict, maxlen_ref, fd, feats, modes):
+    length_feats = len(feats)
+    if length_feats not in solutions_dict:
+        solutions_dict[length_feats] = []
+    thissol = []
+    for idx, feat in enumerate(feats):
+        thissol.append(modes[idx] + fd[feat]["name"])
+    solutions_dict[length_feats].append("[" + ",".join(thissol) + "]")
 
-# # Function to compute weighted average MDL (matching Julia's compute_avg_mdl)
-# def compute_weighted_avg_mdl(allsegments, min_lengths, min_descriptions):
-#     """Compute average minimal description length for a set of phonemes."""
-#     total_avg_length = 0
-#     feature_count = 0
+# Function to compute weighted average MDL (matching Julia's compute_avg_mdl)
+def compute_weighted_avg_mdl(allsegments, min_lengths, min_descriptions):
+    """Compute average minimal description length for a set of phonemes."""
+    total_avg_length = 0
+    feature_count = 0
     
-#     for phoneme in allsegments:
-#         if phoneme in min_descriptions:
-#             feature_descriptions = min_descriptions[phoneme]
-#             unique_features = {item.strip('+-') for sublist in feature_descriptions for item in sublist}
-#             for feature in unique_features:
-#                 if feature in min_lengths:
-#                     total_avg_length += min_lengths[feature]
-#                     feature_count += 1
+    for phoneme in allsegments:
+        if phoneme in min_descriptions:
+            feature_descriptions = min_descriptions[phoneme]
+            unique_features = {item.strip('+-') for sublist in feature_descriptions for item in sublist}
+            for feature in unique_features:
+                if feature in min_lengths:
+                    total_avg_length += min_lengths[feature]
+                    feature_count += 1
     
-#     if feature_count > 0:
-#         return total_avg_length / feature_count
-#     return None
+    if feature_count > 0:
+        return total_avg_length / feature_count
+    return None
 
-# # Function to compute random sample MDL (for parallel execution)
-# def compute_random_sample_mdl(inventory_size, phoneme_pool, featdict, features):
-#     # Randomly sample phonemes from the pool
-#     sampled_phonemes = set(random.sample(phoneme_pool, inventory_size))
+# Function to compute random sample MDL (for parallel execution)
+def compute_random_sample_mdl(inventory_size, phoneme_pool, featdict, features):
+    # Randomly sample phonemes from the pool
+    sampled_phonemes = set(random.sample(phoneme_pool, inventory_size))
 
-#     # Compute natural classes for the sampled phonemes
-#     natural_classes = process_phoneme_inventory(sampled_phonemes, featdict, features)
+    # Compute natural classes for the sampled phonemes
+    natural_classes = process_phoneme_inventory(sampled_phonemes, featdict, features)
     
-#     # Get informativity information
-#     sample_min_lengths, sample_min_descriptions, _, _, _ = get_general_info_natural_classes(natural_classes, features)
+    # Get informativity information
+    sample_min_lengths, sample_min_descriptions, _, _, _ = get_general_info_natural_classes(natural_classes, features)
 
-#     random_avg_mdl = compute_weighted_avg_mdl(sampled_phonemes, sample_min_lengths, sample_min_descriptions)
+    random_avg_mdl = compute_weighted_avg_mdl(sampled_phonemes, sample_min_lengths, sample_min_descriptions)
     
-#     if random_avg_mdl:
-#         return random_avg_mdl
+    if random_avg_mdl:
+        return random_avg_mdl
             
-#     return None
+    return None
 
-# # Collect average MDL per language for each inventory (using simple mean like Plot 2)
-# weighted_avg_mdl = {inv: {"Real": [], "Random": []} for inv in inventories}
+# Collect average MDL per language for each inventory (using simple mean like Plot 2)
+weighted_avg_mdl = {inv: {"Real": [], "Random": []} for inv in inventories}
 
-# print(f"\nUsing ThreadPoolExecutor for parallel processing")
+print(f"\nUsing ThreadPoolExecutor for parallel processing")
 
-# # Process each inventory
-# for inv in inventories:
-#     print(f"\nProcessing inventory: {inv}")
+# Process each inventory
+for inv in inventories:
+    print(f"\nProcessing inventory: {inv}")
     
-#     # Read the feature dictionary for this inventory
-#     featdict, all_segments_inv = readinventory(inv)
-#     features = list(featdict.keys())
+    # Read the feature dictionary for this inventory
+    featdict, all_segments_inv = readinventory(inv)
+    features = list(featdict.keys())
     
-#     lang_count = 0
+    lang_count = 0
     
-#     for language, lang_data in all_data[inv].items():
-#         min_lengths = lang_data["min_lengths"]
-#         min_descriptions = lang_data["min_descriptions"]
+    for language, lang_data in all_data[inv].items():
+        min_lengths = lang_data["min_lengths"]
+        min_descriptions = lang_data["min_descriptions"]
         
-#         # Get the actual phoneme inventory from pb_languages_formatted.csv
-#         lang_rows = pb_languages[pb_languages['language'] == language]
-#         if lang_rows.empty:
-#             continue  # Skip if language not found in CSV
+        # Get the actual phoneme inventory from pb_languages_formatted.csv
+        lang_rows = pb_languages[pb_languages['language'] == language]
+        if lang_rows.empty:
+            continue  # Skip if language not found in CSV
         
-#         inventory_str = lang_rows.iloc[0]["core inventory"]
-#         # Parse the inventory string which is in Python list format: ['a', 'b', ...]
-#         inventory_str = inventory_str.strip('[]')
-#         allsegments_list = [p.strip().strip('\'"') for p in inventory_str.split(',')]
-#         allsegments = {p for p in allsegments_list if p and p != ""}
-#         inventory_size = len(allsegments)
+        inventory_str = lang_rows.iloc[0]["core inventory"]
+        # Parse the inventory string which is in Python list format: ['a', 'b', ...]
+        inventory_str = inventory_str.strip('[]')
+        allsegments_list = [p.strip().strip('\'"') for p in inventory_str.split(',')]
+        allsegments = {p for p in allsegments_list if p and p != ""}
+        inventory_size = len(allsegments)
         
-#         # Compute real average using simple mean (same as Plot 2)
-#         if min_lengths:
-#             mdl_values_lang = list(min_lengths.values())
-#             real_avg_mdl = np.mean(mdl_values_lang)
-#             weighted_avg_mdl[inv]["Real"].append(real_avg_mdl)
-#             lang_count += 1
+        # Compute real average using simple mean (same as Plot 2)
+        if min_lengths:
+            mdl_values_lang = list(min_lengths.values())
+            real_avg_mdl = np.mean(mdl_values_lang)
+            weighted_avg_mdl[inv]["Real"].append(real_avg_mdl)
+            lang_count += 1
             
-#             # Generate NUM_SAMPLES random inventories and compute their average MDL in parallel
-#             with ThreadPoolExecutor(max_workers=4) as executor:
-#                 futures = []
-#                 for sample_num in range(NUM_SAMPLES):
-#                     future = executor.submit(compute_random_sample_mdl, 
-#                                            inventory_size, phoneme_pool, featdict, features)
-#                     futures.append(future)
+            # Generate NUM_SAMPLES random inventories and compute their average MDL in parallel
+            # with ThreadPoolExecutor(max_workers=4) as executor:
+            #     futures = []
+            #     for sample_num in range(NUM_SAMPLES):
+            #         future = executor.submit(compute_random_sample_mdl, 
+            #                                inventory_size, phoneme_pool, featdict, features)
+            #         futures.append(future)
                 
-#                 sample_avg_mdls = []
-#                 for future in as_completed(futures):
-#                     result = future.result()
-#                     if result is not None:
-#                         sample_avg_mdls.append(result)
+            #     sample_avg_mdls = []
+            #     for future in as_completed(futures):
+            #         result = future.result()
+            #         if result is not None:
+            #             sample_avg_mdls.append(result)
 
-#             # sample_avg_mdls = []
-#             # for sample_num in range(NUM_SAMPLES):
-#             #     sample_mdl = compute_random_sample_mdl(inventory_size, phoneme_pool, featdict, features)
-#             #     if sample_mdl is not None:
-#             #         sample_avg_mdls.append(sample_mdl)
+            sample_avg_mdls = []
+            for sample_num in range(NUM_SAMPLES):
+                sample_mdl = compute_random_sample_mdl(inventory_size, phoneme_pool, featdict, features)
+                if sample_mdl is not None:
+                    sample_avg_mdls.append(sample_mdl)
             
-#             # Compute mean of random samples
-#             if sample_avg_mdls:
-#                 mean_random_mdl = np.mean(sample_avg_mdls)
-#                 weighted_avg_mdl[inv]["Random"].append(mean_random_mdl)
+            # Compute mean of random samples
+            if sample_avg_mdls:
+                mean_random_mdl = np.mean(sample_avg_mdls)
+                weighted_avg_mdl[inv]["Random"].append(mean_random_mdl)
             
-#             if lang_count % 10 == 0:
-#                 print(f"  Processed {lang_count} languages...")
+            if lang_count % 10 == 0:
+                print(f"  Processed {lang_count} languages...")
     
-#     print(f"  Processed {lang_count} languages")
-#     print(f"  Real samples: {len(weighted_avg_mdl[inv]['Real'])}")
-#     print(f"  Random samples: {len(weighted_avg_mdl[inv]['Random'])}")
+    print(f"  Processed {lang_count} languages")
+    print(f"  Real samples: {len(weighted_avg_mdl[inv]['Real'])}")
+    print(f"  Random samples: {len(weighted_avg_mdl[inv]['Random'])}")
 
-# # Save weighted_avg_mdl to JSON file
-# output_filename = "weighted_avg_mdl_data.json"
-# with open(output_filename, 'w') as f:
-#     json.dump(weighted_avg_mdl, f, indent=4)
-# print(f"\nweighted_avg_mdl data saved to {output_filename}")
+# Save weighted_avg_mdl to JSON file
+output_filename = "weighted_avg_mdl_data.json"
+with open(output_filename, 'w') as f:
+    json.dump(weighted_avg_mdl, f, indent=4)
+print(f"\nweighted_avg_mdl data saved to {output_filename}")
 
-# Load weighted_avg_mdl data from JSON file
-input_filename = "weighted_avg_mdl_data.json"
-if os.path.exists(input_filename):
-    with open(input_filename, 'r') as f:
-        weighted_avg_mdl = json.load(f)
-    print(f"\nLoaded weighted_avg_mdl data from {input_filename}")
-else:
-    print(f"\nWarning: {input_filename} not found, using computed data")
+# # Load weighted_avg_mdl data from JSON file
+# input_filename = "weighted_avg_mdl_data.json"
+# if os.path.exists(input_filename):
+#     with open(input_filename, 'r') as f:
+#         weighted_avg_mdl = json.load(f)
+#     print(f"\nLoaded weighted_avg_mdl data from {input_filename}")
+# else:
+#     print(f"\nWarning: {input_filename} not found, using computed data")
 
 # Helper function to count frequencies (equivalent to Julia's count_frequencies)
 def count_frequencies(values, bin_edges):
@@ -475,10 +475,27 @@ for inv in inventories:
         plt.grid(True, alpha=0.3)
         plt.tick_params(labelsize=12)
         
-        # Perform Mann-Whitney U test between Real and Random
+        # Perform Monte-Carlo permutation test between Real and Random
         if weighted_avg_mdl[inv]["Real"] and weighted_avg_mdl[inv]["Random"]:
-            # Helper function to compute rank-biserial effect size for unpaired samples
+            def permutation_pvalue(x, y, n_perm=5000, seed=0):
+                """Two-sample Monte-Carlo permutation test using median difference as test statistic."""
+                rng = np.random.default_rng(seed)
+                x = np.array(x)
+                y = np.array(y)
+                obs_diff = abs(np.median(x) - np.median(y))
+                pooled = np.concatenate([x, y])
+                n_x = len(x)
+                count = 0
+                for _ in range(n_perm):
+                    rng.shuffle(pooled)
+                    x_perm = pooled[:n_x]
+                    y_perm = pooled[n_x:]
+                    if abs(np.median(x_perm) - np.median(y_perm)) >= obs_diff:
+                        count += 1
+                return (count + 1) / (n_perm + 1)
+            
             def rank_biserial_unpaired(x, y):
+                """Compute rank-biserial effect size for unpaired samples."""
                 scores = []
                 for xi in x:
                     for yj in y:
@@ -491,15 +508,15 @@ for inv in inventories:
                 A = np.mean(scores)
                 return 2 * A - 1  # in [-1,1]
             
-            statistic, p_real_random = mannwhitneyu(weighted_avg_mdl[inv]["Real"], 
-                                                   weighted_avg_mdl[inv]["Random"], 
-                                                   alternative='two-sided')
+            p_real_random = permutation_pvalue(weighted_avg_mdl[inv]["Real"], 
+                                               weighted_avg_mdl[inv]["Random"],
+                                               n_perm=5000, seed=42)
             r_real_random = rank_biserial_unpaired(weighted_avg_mdl[inv]["Real"], 
-                                                  weighted_avg_mdl[inv]["Random"])
+                                                   weighted_avg_mdl[inv]["Random"])
             n_real = len(weighted_avg_mdl[inv]["Real"])
             n_random = len(weighted_avg_mdl[inv]["Random"])
             
-            print(f"\n  Mann-Whitney U test for {inv} (Real vs Random):")
+            print(f"\n  Monte-Carlo permutation test for {inv} (Real vs Random):")
             print(f"    p-value = {p_real_random:.4g}")
             print(f"    effect size (rank-biserial) = {r_real_random:.3f}")
             print(f"    sample size (Real) = {n_real}")
@@ -555,19 +572,35 @@ ax.set_title('Real Language Distributions by Feature System', fontsize=16)
 ax.grid(True, axis='y', alpha=0.3)
 
 # Calculate statistics and add significance brackets
-from scipy.stats import mannwhitneyu
+def permutation_pvalue(x, y, n_perm=5000, seed=0):
+    """Two-sample Monte-Carlo permutation test using median difference as test statistic."""
+    rng = np.random.default_rng(seed)
+    x = np.array(x)
+    y = np.array(y)
+    obs_diff = abs(np.median(x) - np.median(y))
+    pooled = np.concatenate([x, y])
+    n_x = len(x)
+    count = 0
+    for _ in range(n_perm):
+        rng.shuffle(pooled)
+        x_perm = pooled[:n_x]
+        y_perm = pooled[n_x:]
+        if abs(np.median(x_perm) - np.median(y_perm)) >= obs_diff:
+            count += 1
+    return (count + 1) / (n_perm + 1)
 
-def get_stars(p_value):
-    if p_value < 0.001:
-        return "***"
-    elif p_value < 0.01:
-        return "**"
-    elif p_value < 0.05:
-        return "*"
-    else:
-        return None
+def p_to_stars(p):
+    """Map corrected p-value to significance stars."""
+    if p <= 0.001:
+        return '***'
+    if p <= 0.01:
+        return '**'
+    if p <= 0.05:
+        return '*'
+    return ''
 
 def rank_biserial_unpaired(x, y):
+    """Compute rank-biserial effect size for unpaired samples."""
     scores = []
     for xi in x:
         for yj in y:
@@ -580,81 +613,55 @@ def rank_biserial_unpaired(x, y):
     A = np.mean(scores)
     return 2 * A - 1  # in [-1,1]
 
+# Collect raw p-values for all three pairwise comparisons
+pairs_to_test = [
+    ('HC', 'SPE', 0, 1),
+    ('SPE', 'JFH', 1, 2),
+    ('HC', 'JFH', 0, 2)
+]
+
+pvals_raw = []
+effect_sizes = []
+for inv1, inv2, pos1, pos2 in pairs_to_test:
+    p_val = permutation_pvalue(weighted_avg_mdl[inv1]["Real"],
+                               weighted_avg_mdl[inv2]["Real"],
+                               n_perm=5000, seed=42)
+    r_pair = rank_biserial_unpaired(weighted_avg_mdl[inv1]["Real"],
+                                    weighted_avg_mdl[inv2]["Real"])
+    pvals_raw.append(p_val)
+    effect_sizes.append(r_pair)
+
+# Apply Benjamini-Hochberg FDR correction
+pvals_array = np.array(pvals_raw)
+rejected, pvals_corrected, _, _ = multipletests(pvals_array, alpha=0.05, method='fdr_bh')
+
 # Find max y value for positioning brackets
 max_y = max([max(weighted_avg_mdl[inv]["Real"]) for inv in inventories])
 data_range = max_y - min([min(weighted_avg_mdl[inv]["Real"]) for inv in inventories])
 bracket_spacing = data_range * 0.08
 tick_height = data_range * 0.02
 
-# Test 1: HC vs SPE
-stat_hc_spe, p_hc_spe = mannwhitneyu(weighted_avg_mdl["HC"]["Real"], 
-                                     weighted_avg_mdl["SPE"]["Real"], 
-                                     alternative='two-sided')
-r_hc_spe = rank_biserial_unpaired(weighted_avg_mdl["HC"]["Real"], 
-                                  weighted_avg_mdl["SPE"]["Real"])
-stars_hc_spe = get_stars(p_hc_spe)
-
-if stars_hc_spe:
-    y_bracket_1 = max_y + bracket_spacing
-    ax.plot([positions[0], positions[1]], [y_bracket_1, y_bracket_1], 
+# Draw brackets and print results for each comparison
+for i, (inv1, inv2, pos1, pos2) in enumerate(pairs_to_test):
+    p_adj = pvals_corrected[i]
+    stars = p_to_stars(p_adj)
+    r_pair = effect_sizes[i]
+    
+    y_bracket = max_y + (i + 1) * bracket_spacing
+    ax.plot([positions[pos1], positions[pos2]], [y_bracket, y_bracket], 
             color='black', linewidth=2)
-    ax.plot([positions[0], positions[0]], [y_bracket_1 - tick_height, y_bracket_1 + tick_height], 
+    ax.plot([positions[pos1], positions[pos1]], [y_bracket - tick_height, y_bracket + tick_height], 
             color='black', linewidth=2)
-    ax.plot([positions[1], positions[1]], [y_bracket_1 - tick_height, y_bracket_1 + tick_height], 
+    ax.plot([positions[pos2], positions[pos2]], [y_bracket - tick_height, y_bracket + tick_height], 
             color='black', linewidth=2)
-    ax.text((positions[0] + positions[1]) / 2, y_bracket_1 + 0.05, stars_hc_spe, 
+    ax.text((positions[pos1] + positions[pos2]) / 2, y_bracket + 0.05, stars, 
             ha='center', fontsize=14, fontweight='bold')
-
-print(f"\nMann-Whitney U test - HC vs SPE:")
-print(f"  p-value = {p_hc_spe:.4g}")
-print(f"  effect size (rank-biserial) = {r_hc_spe:.3f}")
-print(f"  significance: {stars_hc_spe}")
-
-# Test 2: SPE vs JFH
-stat_spe_jfh, p_spe_jfh = mannwhitneyu(weighted_avg_mdl["SPE"]["Real"], 
-                                       weighted_avg_mdl["JFH"]["Real"], 
-                                       alternative='two-sided')
-r_spe_jfh = rank_biserial_unpaired(weighted_avg_mdl["SPE"]["Real"], 
-                                   weighted_avg_mdl["JFH"]["Real"])
-stars_spe_jfh = get_stars(p_spe_jfh)
-
-y_bracket_2 = max_y + 2 * bracket_spacing
-ax.plot([positions[1], positions[2]], [y_bracket_2, y_bracket_2], 
-        color='black', linewidth=2)
-ax.plot([positions[1], positions[1]], [y_bracket_2 - tick_height, y_bracket_2 + tick_height], 
-        color='black', linewidth=2)
-ax.plot([positions[2], positions[2]], [y_bracket_2 - tick_height, y_bracket_2 + tick_height], 
-        color='black', linewidth=2)
-ax.text((positions[1] + positions[2]) / 2, y_bracket_2 + 0.05, stars_spe_jfh, 
-        ha='center', fontsize=14, fontweight='bold')
-
-print(f"\nMann-Whitney U test - SPE vs JFH:")
-print(f"  p-value = {p_spe_jfh:.4g}")
-print(f"  effect size (rank-biserial) = {r_spe_jfh:.3f}")
-print(f"  significance: {stars_spe_jfh}")
-
-# Test 3: HC vs JFH
-stat_hc_jfh, p_hc_jfh = mannwhitneyu(weighted_avg_mdl["HC"]["Real"], 
-                                     weighted_avg_mdl["JFH"]["Real"], 
-                                     alternative='two-sided')
-r_hc_jfh = rank_biserial_unpaired(weighted_avg_mdl["HC"]["Real"], 
-                                  weighted_avg_mdl["JFH"]["Real"])
-stars_hc_jfh = get_stars(p_hc_jfh)
-
-y_bracket_3 = max_y + 3 * bracket_spacing
-ax.plot([positions[0], positions[2]], [y_bracket_3, y_bracket_3], 
-        color='black', linewidth=2)
-ax.plot([positions[0], positions[0]], [y_bracket_3 - tick_height, y_bracket_3 + tick_height], 
-        color='black', linewidth=2)
-ax.plot([positions[2], positions[2]], [y_bracket_3 - tick_height, y_bracket_3 + tick_height], 
-        color='black', linewidth=2)
-ax.text((positions[0] + positions[2]) / 2, y_bracket_3 + 0.05, stars_hc_jfh, 
-        ha='center', fontsize=14, fontweight='bold')
-
-print(f"\nMann-Whitney U test - HC vs JFH:")
-print(f"  p-value = {p_hc_jfh:.4g}")
-print(f"  effect size (rank-biserial) = {r_hc_jfh:.3f}")
-print(f"  significance: {stars_hc_jfh}")
+    
+    print(f"\nMonte-Carlo permutation test - {inv1} vs {inv2}:")
+    print(f"  Raw p-value = {pvals_raw[i]:.4g}")
+    print(f"  Corrected p-value (BH) = {p_adj:.4g}")
+    print(f"  Effect size (rank-biserial) = {r_pair:.3f}")
+    print(f"  Significance: {stars if stars else 'ns (not significant)'}")
 
 # Set y-axis limits to accommodate brackets
 y_lower = min([min(weighted_avg_mdl[inv]["Real"]) for inv in inventories]) - data_range * 0.05
