@@ -478,6 +478,8 @@ print("  Scatter plot saved as mdl_differences_scatter.png")
 # Extract phoneme inventories and language families from pb_languages CSV
 print("\nConstructing phoneme inventories for SHAP analysis...")
 
+pb_languages = pd.read_csv("phonemic_inventories/pb_languages_formatted_filtered.csv")
+
 language_list = []
 family_list = []
 phoneme_inventories = {}
@@ -495,7 +497,7 @@ for _, row in pb_languages.iterrows():
     if phonemes:
         language_list.append(language)
         family_list.append(family)
-        phoneme_inventories[language] = set(phonemes)
+        phoneme_inventories[language] = list(set(phonemes[0].split()))
 
 # Collect all unique phonemes
 all_phonemes = set()
@@ -736,6 +738,316 @@ print(f"  Mean Absolute Error: {np.mean(np.abs(residuals)):.4f}")
 print(f"  Base value (expected MDL): {base_value_mdl[0]:.4f}")
 
 print("\n" + "=" * 60)
+
+
+# ============================================================
+# CORRELATION ANALYSIS: Phoneme Frequencies Across Families
+# ============================================================
+
+print("\n" + "=" * 60)
+print("Phoneme Frequency Correlation Analysis")
+print("=" * 60)
+
+# Use the X_rf dataframe (family × phoneme frequencies)
+print(f"\nComputing correlation matrix for {X_rf.shape[1]} phonemes across {X_rf.shape[0]} families...")
+
+# Compute Pearson correlation matrix
+corr_matrix = X_rf.corr(method='pearson')
+
+# Find top correlated phoneme pairs (excluding self-correlation)
+# Flatten the upper triangle and sort by absolute correlation
+corr_pairs = []
+for i in range(len(corr_matrix.columns)):
+    for j in range(i + 1, len(corr_matrix.columns)):
+        phoneme1 = corr_matrix.columns[i]
+        phoneme2 = corr_matrix.columns[j]
+        corr_val = corr_matrix.iloc[i, j]
+        corr_pairs.append({
+            'phoneme1': phoneme1,
+            'phoneme2': phoneme2,
+            'correlation': corr_val,
+            'abs_correlation': abs(corr_val)
+        })
+
+corr_pairs_df = pd.DataFrame(corr_pairs)
+corr_pairs_df = corr_pairs_df.sort_values('abs_correlation', ascending=False)
+
+# Print top 30 most correlated pairs
+print("\nTop 30 most correlated phoneme pairs:")
+print("(positive correlation = frequencies tend to increase together)")
+print("(negative correlation = frequencies tend to move oppositely)")
+print()
+for idx, row in corr_pairs_df.head(30).iterrows():
+    print(f"  {row['phoneme1']:8s} <-> {row['phoneme2']:8s}  r = {row['correlation']:7.4f}")
+
+# Find phoneme pairs most correlated with the top impactful phoneme (dʑ if present)
+top_phonemes_list = top_20_phonemes[:5]  # Use top 5 from SHAP analysis
+print(f"\nCorrelations with top SHAP-important phonemes:")
+for phoneme in top_phonemes_list:
+    if phoneme in X_rf.columns:
+        corr_with_phoneme = corr_matrix[phoneme].sort_values(ascending=False)
+        print(f"\n  {phoneme} (top correlations):")
+        for other_ph in corr_with_phoneme[1:6].index:  # Skip self, show top 5
+            print(f"    {other_ph:8s}  r = {corr_with_phoneme[other_ph]:7.4f}")
+
+# Create and save correlation heatmap (subset to most variable/important phonemes)
+print("\nGenerating correlation heatmap (top 20 SHAP phonemes)...")
+
+# Select subset of phonemes for heatmap (top 20 by SHAP)
+top_20_cols = top_20_phonemes
+subset_corr = corr_matrix.loc[top_20_cols, top_20_cols]
+
+# Mask upper triangle (keep only lower triangle and diagonal)
+mask = np.triu(np.ones_like(subset_corr, dtype=bool), k=1)
+subset_corr_masked = subset_corr.copy()
+subset_corr_masked[mask] = np.nan
+
+# Create heatmap
+fig, ax = plt.subplots(figsize=(14, 12))
+im = ax.imshow(subset_corr_masked, cmap='RdBu_r', aspect='auto', vmin=-1, vmax=1)
+
+# Set ticks and labels
+ax.set_xticks(np.arange(len(top_20_cols)))
+ax.set_yticks(np.arange(len(top_20_cols)))
+ax.set_xticklabels(top_20_cols, rotation=45, ha='right', fontsize=10)
+ax.set_yticklabels(top_20_cols, fontsize=10)
+
+# Add colorbar
+cbar = plt.colorbar(im, ax=ax)
+cbar.set_label('Pearson Correlation', rotation=270, labelpad=20, fontsize=11)
+
+# Add values in cells (only lower triangle)
+for i in range(len(top_20_cols)):
+    for j in range(i + 1):  # Only lower triangle and diagonal
+        val = subset_corr.iloc[i, j]
+        color = 'white' if abs(val) > 0.5 else 'black'
+        ax.text(j, i, f'{val:.2f}', ha='center', va='center', color=color, fontsize=8)
+
+ax.set_title('Phoneme Frequency Correlations (Top 20 SHAP-Important Phonemes)', fontsize=13, pad=20)
+ax.set_xlabel('Phoneme', fontsize=12)
+ax.set_ylabel('Phoneme', fontsize=12)
+
+plt.tight_layout()
+plt.savefig('phoneme_frequency_correlations.png', dpi=300, bbox_inches='tight')
+plt.close()
+
+print("  Saved: phoneme_frequency_correlations.png")
+
+# # Create scatter plots for all phoneme pairs (lower triangle only)
+# print("\nGenerating scatter plots for phoneme frequency correlations...")
+
+# corr_output_dir = "correlations_per_phonemes"
+# if not os.path.exists(corr_output_dir):
+#     os.makedirs(corr_output_dir)
+
+# plot_count = 0
+# for i in range(len(top_20_cols)):
+#     for j in range(i):  # Only lower triangle (j < i)
+#         phoneme1 = top_20_cols[j]
+#         phoneme2 = top_20_cols[i]
+        
+#         freq1 = X_rf[phoneme1].values
+#         freq2 = X_rf[phoneme2].values
+#         corr_val = subset_corr.iloc[i, j]
+        
+#         # Create scatter plot
+#         fig, ax = plt.subplots(figsize=(10, 8))
+#         ax.scatter(freq1, freq2, s=100, alpha=0.6, edgecolors='black', linewidth=0.5, color='steelblue')
+        
+#         # Add trend line
+#         z = np.polyfit(freq1, freq2, 1)
+#         p = np.poly1d(z)
+#         x_line = np.linspace(freq1.min(), freq1.max(), 100)
+#         ax.plot(x_line, p(x_line), "r--", alpha=0.8, linewidth=2, label=f'Linear fit')
+        
+#         # Labels and title
+#         ax.set_xlabel(f'{phoneme1} Frequency', fontsize=12)
+#         ax.set_ylabel(f'{phoneme2} Frequency', fontsize=12)
+#         ax.set_title(f'Frequency Correlation: {phoneme1} vs {phoneme2}\n(r = {corr_val:.4f})', fontsize=13)
+#         ax.grid(True, alpha=0.3)
+#         ax.tick_params(labelsize=10)
+#         ax.legend(fontsize=11)
+        
+#         plt.tight_layout()
+        
+#         # Save with safe filename
+#         safe_name1 = phoneme1.replace('/', '_').replace(' ', '_')
+#         safe_name2 = phoneme2.replace('/', '_').replace(' ', '_')
+#         filename = f"correlation_{safe_name1}_vs_{safe_name2}.png"
+#         plt.savefig(os.path.join(corr_output_dir, filename), dpi=300, bbox_inches='tight')
+#         plt.close()
+#         plot_count += 1
+
+# print(f"  Generated {plot_count} scatter plots (one per unique phoneme pair)")
+# print(f"  Saved in folder: {corr_output_dir}")
+
+# Summary statistics
+print(f"\nCorrelation matrix summary:")
+print(f"  Mean absolute correlation (excluding self): {corr_pairs_df['abs_correlation'].mean():.4f}")
+print(f"  Max positive correlation: {corr_pairs_df['correlation'].max():.4f}")
+print(f"  Max negative correlation: {corr_pairs_df['correlation'].min():.4f}")
+print(f"  Median absolute correlation: {corr_pairs_df['abs_correlation'].median():.4f}")
+
+print("\n" + "=" * 60)
+print("Correlation analysis complete!")
+print("=" * 60)
+
+
+# ============================================================
+# FEATURE-MDL ANALYSIS: Top 10 Phonemes and Their JFH Features
+# ============================================================
+
+print("\n" + "=" * 60)
+print("Feature-MDL Analysis: Top 10 Impactful Phonemes by JFH Features")
+print("=" * 60)
+
+# Get top 10 most impactful phonemes
+top_10_indices = np.argsort(mean_abs_shap)[-10:][::-1]
+top_10_phonemes = [X_rf.columns[i] for i in top_10_indices]
+
+print(f"\nTop 10 phonemes by mean absolute SHAP value:")
+for rank, (idx, phoneme) in enumerate(zip(top_10_indices, top_10_phonemes), 1):
+    print(f"  {rank}. {phoneme}: {mean_abs_shap[idx]:.6f}")
+
+# Create output directory for histograms
+feature_mdl_dir = "feature_mdl_histograms"
+if not os.path.exists(feature_mdl_dir):
+    os.makedirs(feature_mdl_dir)
+
+print(f"\nGenerating feature-MDL histograms for top 10 phonemes...")
+
+# Load JFH feature set from file
+df_jfh = pd.read_csv("feature_sets/JFH_features.txt", sep="\t", index_col=0)
+df_jfh.index.name = 'segment'
+df_jfh = df_jfh.reset_index()
+jfh_fields = list(df_jfh.columns)
+
+print(f"  Loaded {len(df_jfh)} phoneme feature records from JFH feature set")
+print(f"  Features available: {jfh_fields[1:]}")
+
+# For each top 10 phoneme, create a histogram of MDL by JFH features
+for phoneme in top_10_phonemes:
+    if phoneme not in df_jfh['segment'].values:
+        print(f"  Warning: {phoneme} not found in JFH feature set, skipping...")
+        continue
+    
+    # Get JFH features for this phoneme
+    phoneme_jfh_row = df_jfh[df_jfh['segment'] == phoneme].iloc[0]
+    
+    # Get all families where this phoneme appears (frequency > 0)
+    families_with_phoneme = df_rf[df_rf[phoneme] > 0]['family'].values
+    
+    # Collect MDL values by feature presence
+    feature_mdl_data = {}
+    
+    for feature in jfh_fields[1:]:  # Skip 'segment'
+        feature_val = phoneme_jfh_row[feature]
+        
+        # Convert feature to readable form
+        if feature_val == '+':
+            feature_label = f"{feature}\n(+)"
+            feature_status = "present"
+        elif feature_val == '-':
+            feature_label = f"{feature}\n(-)"
+            feature_status = "absent"
+        else:
+            feature_label = f"{feature}\n(n)"
+            feature_status = "neutral"
+        
+        # Get MDL values for families with this phoneme
+        mdl_values = []
+        for family in families_with_phoneme:
+            if family in df_rf['family'].values:
+                mdl_val = df_rf[df_rf['family'] == family]['median_mdl'].values[0]
+                mdl_values.append(mdl_val)
+        
+        if mdl_values:
+            feature_mdl_data[feature_label] = {
+                'values': mdl_values,
+                'mean': np.mean(mdl_values),
+                'median': np.median(mdl_values),
+                'status': feature_status
+            }
+    
+    # Create histogram showing mean MDL for each feature
+    if feature_mdl_data:
+        fig, ax = plt.subplots(figsize=(16, 8))
+        
+        features_list = list(feature_mdl_data.keys())
+        mean_mdl_list = [feature_mdl_data[f]['mean'] for f in features_list]
+        median_mdl_list = [feature_mdl_data[f]['median'] for f in features_list]
+        
+        # Color bars based on feature status
+        colors_list = []
+        for f in features_list:
+            status = feature_mdl_data[f]['status']
+            if status == 'present':
+                colors_list.append('#2ecc71')  # green for +
+            elif status == 'absent':
+                colors_list.append('#e74c3c')  # red for -
+            else:
+                colors_list.append('#95a5a6')  # gray for n
+        
+        # Create bar plot
+        x_pos = np.arange(len(features_list))
+        bars = ax.bar(x_pos, mean_mdl_list, color=colors_list, alpha=0.7, edgecolor='black', linewidth=1.2)
+
+        
+        # Set labels and title
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(features_list, fontsize=9, rotation=45, ha='right')
+        ax.set_ylabel('Median MDL of Families with This Phoneme', fontsize=12)
+        ax.set_xlabel('JFH Features', fontsize=12)
+        ax.set_title(f'JFH Feature Characterization and MDL: {phoneme}\n(Green=+ | Red=- | Gray=n)', fontsize=13, pad=15)
+        ax.grid(True, axis='y', alpha=0.3)
+        ax.tick_params(labelsize=10)
+        ax.legend(fontsize=11)
+        
+        # Add value labels on bars
+        for i, (bar, val) in enumerate(zip(bars, mean_mdl_list)):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                   f'{val:.2f}', ha='center', va='bottom', fontsize=8)
+        
+        plt.tight_layout()
+        
+        # Save figure
+        safe_phoneme_name = phoneme.replace('/', '_').replace(' ', '_').replace('ʑ', 'dz')
+        plt.savefig(os.path.join(feature_mdl_dir, f"feature_mdl_{safe_phoneme_name}.png"), dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"  Saved: feature_mdl_{safe_phoneme_name}.png")
+
+print(f"\nFeature-MDL histograms saved in folder: {feature_mdl_dir}")
+
+# Print summary: for each top 10 phoneme, show key features
+print(f"\n{'Phoneme':<12} {'Key Features (JFH)':<60}")
+print("-" * 72)
+
+for phoneme in top_10_phonemes:
+    if phoneme in df_jfh['segment'].values:
+        phoneme_jfh_row = df_jfh[df_jfh['segment'] == phoneme].iloc[0]
+        
+        # Collect feature descriptions
+        feature_desc = []
+        for feature in jfh_fields[1:]:
+            feature_val = phoneme_jfh_row[feature]
+            if feature_val == '+':
+                feature_desc.append(f"+{feature}")
+            elif feature_val == '-':
+                feature_desc.append(f"-{feature}")
+        
+        features_str = ", ".join(feature_desc[:8])  # Show first 8 features
+        if len(feature_desc) > 8:
+            features_str += "..."
+        
+        print(f"{phoneme:<12} {features_str:<60}")
+
+print("\n" + "=" * 60)
+print("Feature-MDL Analysis Complete")
+print("=" * 60)
+
+
+
 
 
 
