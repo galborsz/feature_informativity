@@ -4,11 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
-import unicodedata
-from scipy.cluster.hierarchy import linkage, fcluster
-from scipy.spatial.distance import pdist
-from scipy.stats import chi2_contingency, fisher_exact
-from sklearn.metrics import silhouette_score
+from scipy.stats import fisher_exact
 from statsmodels.stats.multitest import multipletests
 import shutil
 
@@ -29,21 +25,43 @@ print("\n" + "=" * 60)
 print("Creating Language × Feature System MDL Heatmap")
 print("=" * 60)
 
-# Collect average MDL per language for each inventory
+# Define function to compute weighted average MDL
+def compute_weighted_avg_mdl(allsegments, min_lengths, min_descriptions):
+    """Compute average minimal description length for a set of phonemes."""
+    total_avg_length = 0
+    feature_count = 0
+    
+    for phoneme in allsegments:
+        if phoneme in min_descriptions:
+            feature_descriptions = min_descriptions[phoneme]
+            unique_features = {item.strip('+-') for sublist in feature_descriptions for item in sublist}
+            for feature in unique_features:
+                if feature in min_lengths:
+                    total_avg_length += min_lengths[feature]
+                    feature_count += 1
+    
+    if feature_count > 0:
+        return total_avg_length / feature_count
+    return None
+
+# Collect average MDL per language for each inventory using weighted average
 language_mdl_data = []
 
 for inv in inventories:
     print(f"\nProcessing inventory: {inv}")
     
     for language, lang_data in all_data[inv].items():
-        if "min_lengths" in lang_data:
+        if "min_descriptions" in lang_data and "min_lengths" in lang_data:
+            min_descriptions = lang_data["min_descriptions"]
             min_lengths = lang_data["min_lengths"]
             
-            # Calculate average MDL for this language
-            mdl_values_lang = list(min_lengths.values())
-            if mdl_values_lang:
-                avg_mdl = np.mean(mdl_values_lang)
-                
+            # Get all phonemes for this language
+            allsegments = list(min_descriptions.keys())
+            
+            # Compute weighted average MDL
+            weighted_avg_mdl = compute_weighted_avg_mdl(allsegments, min_lengths, min_descriptions)
+            
+            if weighted_avg_mdl is not None:
                 # Get language family from pb_languages
                 lang_rows = pb_languages[pb_languages['language'] == language]
                 if not lang_rows.empty:
@@ -55,7 +73,7 @@ for inv in inventories:
                     'language': language,
                     'family': family,
                     'inventory': inv,
-                    'avg_mdl': avg_mdl
+                    'avg_mdl': weighted_avg_mdl
                 })
 
 # Convert to DataFrame
@@ -93,18 +111,14 @@ for lang in heatmap_data.index:
 # Create clusters using if-else statements based on JFH MDL
 print("\nCreating clusters based on JFH MDL comparison...")
 
-# Drop rows with any NaN values
-heatmap_data_clean = heatmap_data.dropna()
-print(f"Languages with complete data: {len(heatmap_data_clean)}")
-
 # Cluster 1: JFH average MDL is larger than both HC and SPE
 # Cluster 2: all other languages
 clusters_dict = {'1': [], '2': []}
 
-for language in heatmap_data_clean.index:
-    hc_mdl = heatmap_data_clean.loc[language, 'HC']
-    spe_mdl = heatmap_data_clean.loc[language, 'SPE']
-    jfh_mdl = heatmap_data_clean.loc[language, 'JFH']
+for language in heatmap_data.index:
+    hc_mdl = heatmap_data.loc[language, 'HC']
+    spe_mdl = heatmap_data.loc[language, 'SPE']
+    jfh_mdl = heatmap_data.loc[language, 'JFH']
     
     # Check if JFH is larger than both HC and SPE
     if jfh_mdl > hc_mdl and jfh_mdl > spe_mdl:
@@ -128,10 +142,6 @@ for cluster_id in sorted(clusters_dict.keys()):
     langs = sorted(clusters_dict[cluster_id])
     print(f"  Cluster {cluster_id}: {len(langs)} languages - {', '.join(langs[:5])}{'...' if len(langs) > 5 else ''}")
 
-# Store heatmap_data_const and heatmap_data_var for compatibility with rest of code
-heatmap_data_const = pd.DataFrame()  # Empty since we're not using constant cluster anymore
-heatmap_data_var = heatmap_data_clean
-
 # Create output directory for cluster plots
 cluster_dir = "language_clusters"
 if os.path.exists(cluster_dir):
@@ -147,7 +157,7 @@ sorted_cluster_ids = sorted([k for k in clusters_dict.keys()])
 
 for cluster_id in sorted_cluster_ids:
     langs_in_cluster = sorted(clusters_dict[cluster_id])
-    cluster_data = heatmap_data_clean.loc[langs_in_cluster]
+    cluster_data = heatmap_data.loc[langs_in_cluster]
     
     # Create figure for this cluster
     fig_height = max(6, len(langs_in_cluster) * 0.4)
@@ -171,14 +181,9 @@ for cluster_id in sorted_cluster_ids:
     ax.set_xticklabels(['HC', 'SPE', 'JFH'], rotation=45, ha='right', fontsize=10)
     
     # Set title based on cluster type
-    if cluster_id == 'constant':
-        ax.set_title(f'Constant (all MDL equal) - {len(langs_in_cluster)} languages', 
-                     fontsize=12, fontweight='bold', pad=15)
-        safe_name = 'constant'
-    else:
-        ax.set_title(f'Cluster {cluster_id} ({len(langs_in_cluster)} languages)', 
-                     fontsize=12, fontweight='bold', pad=15)
-        safe_name = f'cluster_{cluster_id:02d}'
+    ax.set_title(f'Cluster {cluster_id} ({len(langs_in_cluster)} languages)', 
+                    fontsize=12, fontweight='bold', pad=15)
+    safe_name = f'cluster_{cluster_id}'
     
     plt.tight_layout()
     
@@ -248,7 +253,8 @@ print("\nGenerating violin plots for each cluster...")
 # Calculate global y-axis range for all MDL values across all clusters
 all_mdl_values = []
 for feature_system in inventories:
-    all_mdl_values.extend(heatmap_data_clean[feature_system].dropna().values)
+    all_mdl_values.extend(heatmap_data[feature_system].values)
+    
 y_min = np.min(all_mdl_values)
 y_max = np.max(all_mdl_values)
 y_margin = (y_max - y_min) * 0.05  # Add 5% margin
@@ -256,7 +262,7 @@ y_axis_range = (1.5, 3.4) #(y_min - y_margin, y_max + y_margin)
 
 for cluster_id in sorted_cluster_ids:
     langs_in_cluster = sorted(clusters_dict[cluster_id])
-    cluster_data = heatmap_data_clean.loc[langs_in_cluster]
+    cluster_data = heatmap_data.loc[langs_in_cluster]
     
     # Calculate scale factor based on cluster size
     # Find the maximum cluster size to normalize
@@ -265,7 +271,7 @@ for cluster_id in sorted_cluster_ids:
     # Scale violin width from 0.3 to 1.0 based on cluster size
     violin_scale = 0.3 + (cluster_size / max_cluster_size) * 0.7
     
-    # Prepare data for violin plot: reshape to long format
+    # Prepare data for violin plot: reshape to long format (cluster_data already has weighted averages)
     violin_data_list = []
     for feature_system in inventories:
         mdl_values = cluster_data[feature_system].values
@@ -305,7 +311,6 @@ for cluster_id in sorted_cluster_ids:
     fig, ax = plt.subplots(figsize=(10, 7))
     
     # Create violin plot with median line
-    # Use scale parameter to make violin width proportional to cluster size
     sns.violinplot(data=violin_df, x='Feature System', y='Average MDL', ax=ax, 
                    palette='Set2', inner=None, linewidth=1.5, scale_hue=False, width=violin_scale)
     
@@ -393,13 +398,6 @@ for idx, (lang, row) in enumerate(heatmap_data_sorted.tail(10).iloc[::-1].iterro
     family = language_to_family.get(lang, 'Unknown')
     print(f"  {idx:2d}. {lang:20s} ({family:20s}): {row['Mean_MDL']:.4f}")
 
-print("\nClustering dendrogram interpretation:")
-print("  - Languages are ordered by hierarchical clustering (Correlation distance + Average linkage)")
-print("  - Clustering is pattern-based: groups languages with similar MDL profiles")
-print("  - Ignores absolute magnitude differences, focuses on relative patterns across HC/SPE/JFH")
-print("  - Data is split into 5 clusters based on dendrogram structure")
-print("  - Each cluster shown in a separate heatmap for readability")
-
 print("\n" + "=" * 60)
 
 # ============================================================
@@ -407,22 +405,39 @@ print("\n" + "=" * 60)
 # ============================================================
 print("\nGenerating global violin plot across all languages...")
 
-# Prepare data for global violin plot: reshape to long format
+# Prepare data for global violin plot using weighted average MDL: reshape to long format
 global_violin_data_list = []
 for inv in inventories:
-    mdl_values = heatmap_data[inv].dropna().values
-    for mdl_val in mdl_values:
-        global_violin_data_list.append({
-            'Feature System': inv,
-            'Average MDL': mdl_val
-        })
+    print(f"\nProcessing inventory: {inv}")
+    
+    data_inv = all_data[inv]
+    
+    for language, lang_data in data_inv.items():
+        if language not in heatmap_data.index:
+            continue
+            
+        if "min_descriptions" in lang_data and "min_lengths" in lang_data:
+            min_descriptions = lang_data["min_descriptions"]
+            min_lengths = lang_data["min_lengths"]
+            
+            # Get all phonemes for this language
+            allsegments = list(min_descriptions.keys())
+            
+            # Compute weighted average MDL
+            weighted_avg_mdl = compute_weighted_avg_mdl(allsegments, min_lengths, min_descriptions)
+            
+            if weighted_avg_mdl is not None:
+                global_violin_data_list.append({
+                    'Feature System': inv,
+                    'Average MDL': weighted_avg_mdl
+                })
 
 global_violin_df = pd.DataFrame(global_violin_data_list)
 
 # Extract data per feature system for statistical tests
-hc_global = heatmap_data['HC'].dropna().values
-spe_global = heatmap_data['SPE'].dropna().values
-jfh_global = heatmap_data['JFH'].dropna().values
+hc_global = global_violin_df[global_violin_df['Feature System'] == 'HC']['Average MDL'].values
+spe_global = global_violin_df[global_violin_df['Feature System'] == 'SPE']['Average MDL'].values
+jfh_global = global_violin_df[global_violin_df['Feature System'] == 'JFH']['Average MDL'].values
 
 # Perform pairwise Monte-Carlo permutation tests
 pairs_global = [
@@ -465,8 +480,6 @@ for i, median_val in enumerate(medians_global):
 # Set labels and title
 ax.set_xlabel('Feature System', fontsize=12, fontweight='bold')
 ax.set_ylabel('Average MDL', fontsize=12, fontweight='bold')
-# ax.set_title(f'All Languages ({len(heatmap_data)} languages) - Feature System Comparison', 
-#              fontsize=14, fontweight='bold', pad=15)
 
 # Add p-value annotation box if sample size is sufficient
 if len(hc_global) > 2 and len(spe_global) > 2 and len(jfh_global) > 2:
@@ -537,7 +550,7 @@ print("\nBuilding phoneme presence dataset...")
 
 # Collect all unique phonemes across all languages
 all_phonemes = set()
-for lang in heatmap_data_clean.index:
+for lang in heatmap_data.index:
     lang_rows = pb_languages[pb_languages['language'] == lang]
     if not lang_rows.empty:
         inventory_str = lang_rows.iloc[0]["core inventory"]
@@ -553,7 +566,7 @@ print(f"Total unique phonemes: {len(all_phonemes)}")
 # Create language-level dataset
 language_phoneme_data = []
 
-for language in heatmap_data_clean.index:
+for language in heatmap_data.index:
     # Find which cluster this language belongs to
     cluster_id = None
     for cid, langs in clusters_dict.items():
@@ -604,155 +617,77 @@ for cid in cluster_ids_filtered:
     count = (df_lang_filtered['cluster'] == cid).sum()
     print(f"  Cluster {cid}: {count} languages")
 
-if len(cluster_ids_filtered) < 1:
-    print("\nWarning: No clusters available after filtering.")
-    contingency_results = []
-elif len(cluster_ids_filtered) == 2:
-    # Apply Fisher's exact test for 2 clusters
-    print("\n[OK] Exactly 2 clusters detected. Applying Fisher's exact test...")
+
+print("\nApplying Fisher's exact test...")
+
+cluster_1, cluster_2 = cluster_ids_filtered[0], cluster_ids_filtered[1]
+print(f"Comparing Cluster {cluster_1} (JFH > HC & JFH > SPE) vs Cluster {cluster_2} (others)")
+
+contingency_results = []
+p_values_raw = []
+
+for phoneme in all_phonemes:
+    # Get languages in each cluster
+    cluster_1_langs = df_lang_filtered[df_lang_filtered['cluster'] == cluster_1]
+    cluster_2_langs = df_lang_filtered[df_lang_filtered['cluster'] == cluster_2]
     
-    cluster_1, cluster_2 = cluster_ids_filtered[0], cluster_ids_filtered[1]
-    print(f"Comparing Cluster {cluster_1} (JFH > HC & JFH > SPE) vs Cluster {cluster_2} (others)")
+    # Build 2x2 contingency table
+    c1_has = (cluster_1_langs[phoneme] == 1).sum()
+    c1_no = (cluster_1_langs[phoneme] == 0).sum()
+    c2_has = (cluster_2_langs[phoneme] == 1).sum()
+    c2_no = (cluster_2_langs[phoneme] == 0).sum()
+        
+    contingency_table_2x2 = [[c1_has, c1_no], [c2_has, c2_no]]
     
-    contingency_results = []
-    p_values_raw = []
+    # Perform Fisher's exact test
+    try:
+        oddsratio, p_value = fisher_exact(contingency_table_2x2)
+    except:
+        oddsratio = np.nan
+        p_value = np.nan
     
-    for phoneme in all_phonemes:
-        # Get languages in each cluster
-        cluster_1_langs = df_lang_filtered[df_lang_filtered['cluster'] == cluster_1]
-        cluster_2_langs = df_lang_filtered[df_lang_filtered['cluster'] == cluster_2]
-        
-        # Build 2x2 contingency table
-        c1_has = (cluster_1_langs[phoneme] == 1).sum()
-        c1_no = (cluster_1_langs[phoneme] == 0).sum()
-        c2_has = (cluster_2_langs[phoneme] == 1).sum()
-        c2_no = (cluster_2_langs[phoneme] == 0).sum()
-        
-        contingency_table_2x2 = [[c1_has, c1_no], [c2_has, c2_no]]
-        
-        # Perform Fisher's exact test
-        try:
-            oddsratio, p_value = fisher_exact(contingency_table_2x2)
-        except:
-            oddsratio = np.nan
-            p_value = np.nan
-        
-        p_values_raw.append(p_value)
-        
-        # Calculate proportions
-        c1_total = c1_has + c1_no
-        c2_total = c2_has + c2_no
-        c1_proportion_str = f"{c1_has}/{c1_total} = {(c1_has / c1_total * 100):.1f}%" if c1_total > 0 else "N/A"
-        c2_proportion_str = f"{c2_has}/{c2_total} = {(c2_has / c2_total * 100):.1f}%" if c2_total > 0 else "N/A"
-        
-        # Store results (will add corrected p-value later)
-        result_dict = {'phoneme': phoneme}
-        result_dict[f'cluster_{cluster_1}_has'] = c1_has
-        result_dict[f'cluster_{cluster_1}_no'] = c1_no
-        result_dict[f'cluster_{cluster_2}_has'] = c2_has
-        result_dict[f'cluster_{cluster_2}_no'] = c2_no
-        result_dict[f'proportion_cluster_{cluster_1}'] = c1_proportion_str
-        result_dict[f'proportion_cluster_{cluster_2}'] = c2_proportion_str
-        result_dict['oddsratio'] = oddsratio
-        result_dict['p_value'] = p_value
-        
-        contingency_results.append(result_dict)
+    p_values_raw.append(p_value)
     
-    # Apply Benjamini-Hochberg FDR correction to all p-values
-    p_values_array = np.array(p_values_raw)
-    rejected, p_values_corrected, _, _ = multipletests(p_values_array, alpha=0.05, method='fdr_bh')
+    # Calculate proportions
+    c1_total = c1_has + c1_no
+    c2_total = c2_has + c2_no
+    c1_proportion_str = f"{c1_has}/{c1_total} = {(c1_has / c1_total * 100):.1f}%" if c1_total > 0 else "N/A"
+    c2_proportion_str = f"{c2_has}/{c2_total} = {(c2_has / c2_total * 100):.1f}%" if c2_total > 0 else "N/A"
     
-    # Add corrected p-values to results
-    for i, result_dict in enumerate(contingency_results):
-        result_dict['p_value_corrected'] = p_values_corrected[i]
+    # Store results (will add corrected p-value later)
+    result_dict = {'phoneme': phoneme}
+    result_dict[f'cluster_{cluster_1}_has'] = c1_has
+    result_dict[f'cluster_{cluster_1}_no'] = c1_no
+    result_dict[f'cluster_{cluster_2}_has'] = c2_has
+    result_dict[f'cluster_{cluster_2}_no'] = c2_no
+    result_dict[f'proportion_cluster_{cluster_1}'] = c1_proportion_str
+    result_dict[f'proportion_cluster_{cluster_2}'] = c2_proportion_str
+    result_dict['oddsratio'] = oddsratio
+    result_dict['p_value'] = p_value
     
-else:
-    # More than 2 clusters: apply Fisher's exact test comparing grouped clusters vs cluster 4
-    print(f"\n[OK] More than 2 clusters detected ({len(cluster_ids_filtered)} clusters). Applying Fisher's exact test...")
-    print("Grouping first 3 clusters together and comparing with Cluster 4...")
+    contingency_results.append(result_dict)
+
+# Apply Benjamini-Hochberg FDR correction to all p-values
+p_values_array = np.array(p_values_raw)
+rejected, p_values_corrected, _, _ = multipletests(p_values_array, alpha=0.05, method='fdr_bh')
     
-    # Group first 3 clusters together
-    grouped_clusters = cluster_ids_filtered[:3]
-    cluster_2 = max(cluster_ids_filtered)  # Cluster 4 (or highest)
-    print(f"Comparing Grouped Clusters {grouped_clusters} vs Cluster {cluster_2}")
-    
-    contingency_results = []
-    p_values_raw = []
-    
-    for phoneme in all_phonemes:
-        # Build 2x2 contingency table: grouped vs cluster 4
-        # Count phoneme presence in grouped clusters
-        grouped_has = 0
-        grouped_no = 0
-        for cid in grouped_clusters:
-            cluster_langs = df_lang_filtered[df_lang_filtered['cluster'] == cid]
-            grouped_has += (cluster_langs[phoneme] == 1).sum()
-            grouped_no += (cluster_langs[phoneme] == 0).sum()
-        
-        # Count phoneme presence in cluster 4
-        cluster_4_langs = df_lang_filtered[df_lang_filtered['cluster'] == cluster_2]
-        c2_has = (cluster_4_langs[phoneme] == 1).sum()
-        c2_no = (cluster_4_langs[phoneme] == 0).sum()
-        
-        contingency_table_2x2 = [[grouped_has, grouped_no], [c2_has, c2_no]]
-        
-        # Perform Fisher's exact test
-        try:
-            oddsratio, p_value = fisher_exact(contingency_table_2x2)
-        except:
-            oddsratio = np.nan
-            p_value = np.nan
-        
-        p_values_raw.append(p_value)
-        
-        # Calculate proportions
-        grouped_total = grouped_has + grouped_no
-        c2_total = c2_has + c2_no
-        grouped_proportion_str = f"{grouped_has}/{grouped_total} = {(grouped_has / grouped_total * 100):.1f}%" if grouped_total > 0 else "N/A"
-        c2_proportion_str = f"{c2_has}/{c2_total} = {(c2_has / c2_total * 100):.1f}%" if c2_total > 0 else "N/A"
-        
-        # Store results (will add corrected p-value later)
-        result_dict = {'phoneme': phoneme}
-        result_dict[f'cluster_grouped_has'] = grouped_has
-        result_dict[f'cluster_grouped_no'] = grouped_no
-        result_dict[f'cluster_{cluster_2}_has'] = c2_has
-        result_dict[f'cluster_{cluster_2}_no'] = c2_no
-        result_dict[f'proportion_cluster_grouped'] = grouped_proportion_str
-        result_dict[f'proportion_cluster_{cluster_2}'] = c2_proportion_str
-        result_dict['oddsratio'] = oddsratio
-        result_dict['p_value'] = p_value
-        
-        # Also store individual cluster counts for reference
-        for cid in cluster_ids_filtered:
-            cluster_langs = df_lang_filtered[df_lang_filtered['cluster'] == cid]
-            has_phoneme = (cluster_langs[phoneme] == 1).sum()
-            no_phoneme = (cluster_langs[phoneme] == 0).sum()
-            total = has_phoneme + no_phoneme
-            proportion_str = f"{has_phoneme}/{total} = {(has_phoneme / total * 100):.1f}%" if total > 0 else "N/A"
-            
-            result_dict[f'cluster_{cid}_has'] = has_phoneme
-            result_dict[f'cluster_{cid}_no'] = no_phoneme
-            result_dict[f'proportion_cluster_{cid}'] = proportion_str
-        
-        contingency_results.append(result_dict)
-    
-    # Apply Benjamini-Hochberg FDR correction to all p-values
-    p_values_array = np.array(p_values_raw)
-    rejected, p_values_corrected, _, _ = multipletests(p_values_array, alpha=0.05, method='fdr_bh')
-    
-    # Add corrected p-values to results
-    for i, result_dict in enumerate(contingency_results):
-        result_dict['p_value_corrected'] = p_values_corrected[i]
+# Add corrected p-values to results
+for i, result_dict in enumerate(contingency_results):
+    result_dict['p_value_corrected'] = p_values_corrected[i]
+
+# Add list of languages containing each phoneme
+for result_dict in contingency_results:
+    phoneme = result_dict['phoneme']
+    languages_with_phoneme = df_lang[df_lang[phoneme] == 1]['language'].tolist()
+    result_dict['languages_with_phoneme'] = '; '.join(sorted(languages_with_phoneme))
 
 # Convert results to DataFrame
 df_contingency_results = pd.DataFrame(contingency_results)
 
-# If 2 clusters or multi-cluster with Fisher's test, sort by p-value and add significance columns
-if len(cluster_ids_filtered) == 2 or len(cluster_ids_filtered) > 2:
-    df_contingency_results = df_contingency_results.sort_values('p_value_corrected').reset_index(drop=True)
-    df_contingency_results['significant_0.001'] = df_contingency_results['p_value_corrected'].apply(lambda p: 'Yes' if p < 0.001 else 'No')
-    df_contingency_results['significant_0.01'] = df_contingency_results['p_value_corrected'].apply(lambda p: 'Yes' if p < 0.01 else 'No')
-    df_contingency_results['significant_0.05'] = df_contingency_results['p_value_corrected'].apply(lambda p: 'Yes' if p < 0.05 else 'No')
+df_contingency_results = df_contingency_results.sort_values('p_value_corrected').reset_index(drop=True)
+df_contingency_results['significant_0.001'] = df_contingency_results['p_value_corrected'].apply(lambda p: 'Yes' if p < 0.001 else 'No')
+df_contingency_results['significant_0.01'] = df_contingency_results['p_value_corrected'].apply(lambda p: 'Yes' if p < 0.01 else 'No')
+df_contingency_results['significant_0.05'] = df_contingency_results['p_value_corrected'].apply(lambda p: 'Yes' if p < 0.05 else 'No')
 
 # Determine output filename and save based on number of clusters
 csv_filename = 'fisher_exact_phoneme_cluster_results.csv'
@@ -788,141 +723,6 @@ print("Fisher's Exact Test Analysis Complete")
 print("=" * 60)
 print(f"\nResults saved to: {csv_filename}")
 print("\n" + "=" * 60)
-
-# ============================================================
-# TOP 15 PHONEMES: Feature Description Analysis
-# ============================================================
-
-if len(cluster_ids_filtered) >= 2:
-    print("\n" + "=" * 60)
-    print("Analyzing Top 15 Significant Phonemes: Feature Descriptions")
-    print("=" * 60)
-    
-    # Get candidate phonemes by p-value and filter to only those with descriptions in all inventories
-    all_candidates = df_contingency_results['phoneme'].tolist()
-  
-    top_15_phonemes = all_candidates[:15]
-    print(f"\nTop 15 phonemes by significance (with descriptions in all inventories): {top_15_phonemes}")
-    
-    # Extract min_lengths for these phonemes from each inventory
-    # phoneme -> {inventory -> {language -> avg_min_length_of_features}}
-    phoneme_features = {}
-    
-    for phoneme in top_15_phonemes:
-        phoneme_features[phoneme] = {}
-        
-        for inv in inventories:
-            phoneme_features[phoneme][inv] = {}
-            
-            # Load the data for this inventory
-            data_inv = all_data[inv]
-            
-            # For each language, get the features describing this phoneme and their min_lengths
-            for language, lang_data in data_inv.items():
-                if "min_descriptions" in lang_data and "min_lengths" in lang_data:
-                    min_descriptions = lang_data["min_descriptions"]
-                    min_lengths = lang_data["min_lengths"]
-                    
-                    # Get the features describing this phoneme
-                    if phoneme in min_descriptions:
-                        feature_desc = min_descriptions[phoneme]
-                        
-                        # Extract all unique features from feature_desc (which is a list of descriptions/features)
-                        features = set()
-                        for mindesc in feature_desc:
-                            for feat in mindesc:
-                                features.add(feat.strip('+-'))
-                        
-                        features = list(features)  # Convert back to list
-                        
-                        # Get min_lengths for each feature and compute average
-                        feature_lengths = []
-                        for feature in features:
-                            if feature in min_lengths:
-                                feature_lengths.append(min_lengths[feature])
-                        
-                        # Store average min_length for this phoneme in this language
-                        if feature_lengths:
-                            avg_mdl = np.mean(feature_lengths) # average over features
-                            phoneme_features[phoneme][inv][language] = avg_mdl
-                            # print(f"  {phoneme} | {inv} | {language}: avg MDL = {avg_mdl:.2f}")
-    
-    # Calculate average MDL for each phoneme per inventory
-    phoneme_mdl_stats = []
-    
-    for phoneme in top_15_phonemes:
-        for inv in inventories:
-            mdl_values = list(phoneme_features[phoneme][inv].values())
-            
-            if mdl_values:
-                avg_mdl = np.mean(mdl_values) # average over all languages
-                std_mdl = np.std(mdl_values)
-                n_langs = len(mdl_values)
-            else:
-                avg_mdl = 0
-                std_mdl = 0
-                n_langs = 0
-            
-            phoneme_mdl_stats.append({
-                'phoneme': phoneme,
-                'inventory': inv,
-                'avg_mdl': avg_mdl,
-                'std_mdl': std_mdl,
-                'n_langs': n_langs
-            })
-    
-    df_phoneme_mdl = pd.DataFrame(phoneme_mdl_stats)
-    
-    print("\nAverage feature count (MDL) by phoneme and inventory:")
-    print(df_phoneme_mdl.to_string(index=False))
-    
-    # Create histogram
-    fig, ax = plt.subplots(figsize=(16, 8))
-    
-    # Prepare data for grouped bar chart
-    phoneme_list = top_15_phonemes
-    x = np.arange(len(phoneme_list))
-    width = 0.25
-    
-    for i, inv in enumerate(inventories):
-        inv_data = df_phoneme_mdl[df_phoneme_mdl['inventory'] == inv]
-        # Ensure data is in the same order as phoneme_list
-        mdl_values = [inv_data[inv_data['phoneme'] == ph]['avg_mdl'].values[0] if len(inv_data[inv_data['phoneme'] == ph]) > 0 else 0 for ph in phoneme_list]
-        std_values = [inv_data[inv_data['phoneme'] == ph]['std_mdl'].values[0] if len(inv_data[inv_data['phoneme'] == ph]) > 0 else 0 for ph in phoneme_list]
-        
-        ax.bar(x + i * width, mdl_values, width, label=inv, alpha=0.8, yerr=std_values, capsize=5, error_kw={'linewidth': 1.5})
-    
-    # Customize plot
-    ax.set_xlabel('Phoneme', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Average MDL', fontsize=12, fontweight='bold')
-    ax.set_title('Top 15 Significant Phonemes: Average Feature Description Length by Feature System', 
-                 fontsize=13, fontweight='bold', pad=15)
-    ax.set_xticks(x + width)
-    ax.set_xticklabels([f'/{ph}/' for ph in phoneme_list], rotation=45, ha='right', fontsize=10)
-    ax.legend(fontsize=11, loc='upper left')
-    ax.grid(True, alpha=0.3, axis='y')
-    
-    plt.tight_layout()
-    plt.savefig('top_15_phonemes_feature_mdl.png', dpi=300, bbox_inches='tight')
-    print(f"\n[OK] Histogram saved as: top_15_phonemes_feature_mdl.png")
-    plt.close()
-    
-    # Print summary statistics
-    print("\n" + "=" * 60)
-    print("Summary: Average Feature Count per Phoneme")
-    print("=" * 60)
-    
-    for phoneme in top_15_phonemes:
-        print(f"\n/{phoneme}/:")
-        for inv in inventories:
-            inv_stats = df_phoneme_mdl[(df_phoneme_mdl['phoneme'] == phoneme) & (df_phoneme_mdl['inventory'] == inv)]
-            if len(inv_stats) > 0:
-                row = inv_stats.iloc[0]
-                print(f"  {inv}: avg={row['avg_mdl']:.2f} ± {row['std_mdl']:.2f} (n={int(row['n_langs'])} languages)")
-    
-    print("\n" + "=" * 60)
-    print("Top 15 Phonemes Feature Analysis Complete")
-    print("=" * 60)
     
 # ============================================================
 # Create individual plots for significant phonemes: Cluster × Phoneme Presence + MDL
@@ -938,14 +738,7 @@ if os.path.exists(phoneme_plots_dir):
 os.makedirs(phoneme_plots_dir)
 
 # Get cluster information
-if n_clusters_var == 2:
-    cluster_1, cluster_2 = cluster_ids_filtered[0], cluster_ids_filtered[1]
-    other_clusters = None
-else:
-    # For more than 2 clusters, compare cluster 4 (or largest cluster ID) vs all others grouped
-    cluster_2 = max(cluster_ids_filtered)  # Latest cluster number
-    other_clusters = [c for c in cluster_ids_filtered if c != cluster_2]
-    cluster_1 = "grouped_others"  # Label for grouped clusters
+cluster_1, cluster_2 = cluster_ids_filtered[0], cluster_ids_filtered[1]
 
 # Filter to only phonemes with significant p-values (α=0.05) using corrected p-values
 significant_phonemes = df_contingency_results[df_contingency_results['p_value_corrected'] < 0.05]['phoneme'].tolist()
@@ -965,32 +758,31 @@ for phoneme in significant_phonemes:
         
         # For each language, get the features describing this phoneme and their min_lengths
         for language, lang_data in data_inv.items():
-            if "min_descriptions" in lang_data and "min_lengths" in lang_data:
-                min_descriptions = lang_data["min_descriptions"]
-                min_lengths = lang_data["min_lengths"]
+            min_descriptions = lang_data["min_descriptions"]
+            min_lengths = lang_data["min_lengths"]
+            
+            # Get the features describing this phoneme
+            if phoneme in min_descriptions:
+                feature_desc = min_descriptions[phoneme]
                 
-                # Get the features describing this phoneme
-                if phoneme in min_descriptions:
-                    feature_desc = min_descriptions[phoneme]
-                    
-                    # Extract all unique features from feature_desc (which is a list of descriptions/features)
-                    features = set()
-                    for mindesc in feature_desc:
-                        for feat in mindesc:
-                            features.add(feat.strip('+-'))
-                    
-                    features = list(features)  # Convert back to list
-                    
-                    # Get min_lengths for each feature and compute average
-                    feature_lengths = []
-                    for feature in features:
-                        if feature in min_lengths:
-                            feature_lengths.append(min_lengths[feature])
-                    
-                    # Store average min_length for this phoneme in this language
-                    if feature_lengths:
-                        avg_mdl = np.mean(feature_lengths) # average over features
-                        phoneme_mdl_all[phoneme][inv][language] = avg_mdl
+                # Extract all unique features from feature_desc (which is a list of descriptions/features)
+                features = set()
+                for mindesc in feature_desc:
+                    for feat in mindesc:
+                        features.add(feat.strip('+-'))
+                
+                features = list(features)  # Convert back to list
+                
+                # Get min_lengths for each feature and compute average
+                feature_lengths = []
+                for feature in features:
+                    if feature in min_lengths:
+                        feature_lengths.append(min_lengths[feature])
+                
+                # Store average min_length for this phoneme in this language
+                if feature_lengths:
+                    avg_mdl = np.mean(feature_lengths) # average over features
+                    phoneme_mdl_all[phoneme][inv][language] = avg_mdl
 
 # Create individual plots for each significant phoneme
 for phoneme in significant_phonemes:
@@ -1001,35 +793,18 @@ for phoneme in significant_phonemes:
         row = phoneme_row.iloc[0]
         
         # Calculate proportions based on cluster configuration
-        if n_clusters_var == 2:
-            # 2-cluster case: compare cluster 1 vs cluster 2
-            c1_has = row[f'cluster_{cluster_1}_has']
-            c1_no = row[f'cluster_{cluster_1}_no']
-            c2_has = row[f'cluster_{cluster_2}_has']
-            c2_no = row[f'cluster_{cluster_2}_no']
-            
-            c1_total = c1_has + c1_no
-            c2_total = c2_has + c2_no
-            c1_prop = c1_has / c1_total if c1_total > 0 else 0
-            c2_prop = c2_has / c2_total if c2_total > 0 else 0
-            
-            category_1_label = f'Cluster {cluster_1}'
-            category_2_label = f'Cluster {cluster_2}'
-        else:
-            # Multi-cluster case: compare other clusters grouped vs cluster 4
-            # Aggregate counts from other clusters
-            c1_has = sum(row[f'cluster_{c}_has'] for c in other_clusters)
-            c1_no = sum(row[f'cluster_{c}_no'] for c in other_clusters)
-            c2_has = row[f'cluster_{cluster_2}_has']
-            c2_no = row[f'cluster_{cluster_2}_no']
-            
-            c1_total = c1_has + c1_no
-            c2_total = c2_has + c2_no
-            c1_prop = c1_has / c1_total if c1_total > 0 else 0
-            c2_prop = c2_has / c2_total if c2_total > 0 else 0
-            
-            category_1_label = f'Others (C{"+C".join(map(str, other_clusters))})'
-            category_2_label = f'Cluster {cluster_2}'
+        c1_has = row[f'cluster_{cluster_1}_has']
+        c1_no = row[f'cluster_{cluster_1}_no']
+        c2_has = row[f'cluster_{cluster_2}_has']
+        c2_no = row[f'cluster_{cluster_2}_no']
+        
+        c1_total = c1_has + c1_no
+        c2_total = c2_has + c2_no
+        c1_prop = c1_has / c1_total if c1_total > 0 else 0
+        c2_prop = c2_has / c2_total if c2_total > 0 else 0
+        
+        category_1_label = f'Cluster {cluster_1}'
+        category_2_label = f'Cluster {cluster_2}'
         
         # Create figure with two subplots
         fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(16, 7))
@@ -1112,8 +887,7 @@ for phoneme in significant_phonemes:
         
         # Set labels and limits
         ax_right.set_xlabel('Feature System', fontsize=12, fontweight='bold')
-        ax_right.set_ylabel('MDL', fontsize=12, fontweight='bold')
-        # ax_right.set_title(f'Feature Description Length Distribution', fontsize=12, fontweight='bold')
+        ax_right.set_ylabel('Average MDL over phoneme features', fontsize=12, fontweight='bold')
         ax_right.grid(True, alpha=0.3, axis='y')
         ax_right.set_axisbelow(True)
         
@@ -1132,3 +906,138 @@ for phoneme in significant_phonemes:
 print(f"\n[OK] Individual phoneme plots saved in folder: {phoneme_plots_dir}")
 print(f"Total plots created: {len(significant_phonemes)}")
 
+# ============================================================
+# Create individual plots for significant phonemes using heatmap_data MDL
+# (Language-level average MDL for all feature systems)
+# Grouped violin plots: For each feature system, show distributions with and without phoneme
+# ============================================================
+print("\n" + "=" * 60)
+print("Creating Individual Phoneme Plots with Language-level MDL from heatmap_data")
+print("=" * 60)
+
+# Create output directory for phoneme plots with heatmap_data
+phoneme_plots_dir_heatmap = "phoneme_cluster_presence_plots_heatmap_mdl"
+if os.path.exists(phoneme_plots_dir_heatmap):
+    shutil.rmtree(phoneme_plots_dir_heatmap)
+os.makedirs(phoneme_plots_dir_heatmap)
+
+# Create individual plots for each significant phoneme using heatmap_data MDL
+for phoneme in significant_phonemes:
+    # Get languages that contain this phoneme
+    languages_with_phoneme = df_lang[df_lang[phoneme] == 1]['language'].tolist()
+    
+    # Prepare combined data for grouped violin plot
+    combined_violin_data = []
+    
+    # ===== COLLECT DATA: With phoneme =====
+    for inv in inventories:
+        mdl_values_with = []
+        for language in languages_with_phoneme:
+            if language in heatmap_data.index:
+                mdl_val = heatmap_data.loc[language, inv]
+                mdl_values_with.append(mdl_val)
+        
+        # Add to combined dataframe
+        for mdl_val in mdl_values_with:
+            combined_violin_data.append({
+                'Feature System': inv,
+                'Phoneme Presence': f'With /{phoneme}/',
+                'MDL': mdl_val
+            })
+    
+    # ===== COLLECT DATA: Without phoneme (excluding this phoneme's features) =====
+    for inv in inventories:
+        mdl_values_excluding = []
+        
+        # For each language in the dataset
+        for language in heatmap_data.index:
+            # Get the data for this inventory
+            data_inv = all_data[inv]
+            
+            if language in data_inv:
+                lang_data = data_inv[language]
+
+                min_descriptions = lang_data["min_descriptions"]
+                min_lengths = lang_data["min_lengths"]
+                
+                # Collect all phonemes except the current one
+                allsegments_excluding = [pho for pho in min_descriptions.keys() if pho != phoneme]
+                
+                # Compute weighted average MDL excluding current phoneme
+                weighted_avg_mdl_excluding = compute_weighted_avg_mdl(allsegments_excluding, min_lengths, min_descriptions)
+                
+                # Store weighted average MDL for this language excluding current phoneme
+                if weighted_avg_mdl_excluding is not None:
+                    mdl_values_excluding.append(weighted_avg_mdl_excluding)
+        
+        # Add to combined dataframe
+        for mdl_val in mdl_values_excluding:
+            combined_violin_data.append({
+                'Feature System': inv,
+                'Phoneme Presence': f'Without /{phoneme}/',
+                'MDL': mdl_val
+            })
+    
+    # Convert to DataFrame
+    combined_violin_df = pd.DataFrame(combined_violin_data)
+    
+    # Create single grouped violin plot
+    fig, ax = plt.subplots(figsize=(12, 7))
+    
+    # Create grouped violin plot with hue for 'Phoneme Presence'
+    sns.violinplot(data=combined_violin_df, x='Feature System', y='MDL', 
+                   hue='Phoneme Presence', ax=ax, 
+                   palette=['#1f77b4', '#ff7f0e'], inner=None, linewidth=1.5,
+                   split=False)
+    
+    # Add individual sample points
+    sns.stripplot(data=combined_violin_df, x='Feature System', y='MDL', 
+                  hue='Phoneme Presence', ax=ax,
+                  color='black', alpha=0.3, size=3, jitter=True, dodge=True,
+                  legend=False)
+    
+    # Calculate and add median lines for each combination
+    for feature_idx, feature_system in enumerate(inventories):
+        # Median with phoneme
+        with_data = combined_violin_df[
+            (combined_violin_df['Feature System'] == feature_system) & 
+            (combined_violin_df['Phoneme Presence'] == f'With /{phoneme}/')
+        ]
+        if len(with_data) > 0:
+            median_with = with_data['MDL'].median()
+            # Position slightly to the left within the violin
+            ax.hlines(median_with, feature_idx - 0.2, feature_idx - 0.05, 
+                     colors='darkred', linewidth=2.5)
+        
+        # Median without phoneme
+        without_data = combined_violin_df[
+            (combined_violin_df['Feature System'] == feature_system) & 
+            (combined_violin_df['Phoneme Presence'] == f'Without /{phoneme}/')
+        ]
+        if len(without_data) > 0:
+            median_without = without_data['MDL'].median()
+            # Position slightly to the right within the violin
+            ax.hlines(median_without, feature_idx + 0.05, feature_idx + 0.2, 
+                     colors='darkred', linewidth=2.5)
+    
+    # Customize plot
+    ax.set_xlabel('Feature System', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Average MDL', fontsize=12, fontweight='bold')
+    ax.set_title(f'Phoneme /{phoneme}/', fontsize=13, fontweight='bold')
+    ax.grid(True, alpha=0.3, axis='y')
+    ax.set_axisbelow(True)
+    ax.set_ylim(1.5, 3.4)
+    
+    # Customize legend
+    ax.legend(title='Phoneme Presence', fontsize=10, title_fontsize=11, loc='upper right')
+    
+    plt.tight_layout()
+    
+    # Save individual plot
+    safe_phoneme_name = phoneme.replace('/', '_').replace(' ', '_')
+    filename = os.path.join(phoneme_plots_dir_heatmap, f'phoneme_{safe_phoneme_name}_mdl_comparison.png')
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    plt.close()
+
+print(f"\n[OK] Individual phoneme plots with heatmap_data MDL saved in folder: {phoneme_plots_dir_heatmap}")
+print(f"Total plots created: {len(significant_phonemes)}")
