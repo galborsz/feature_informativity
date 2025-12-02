@@ -90,47 +90,94 @@ for lang in heatmap_data.index:
     else:
         language_to_family[lang] = 'Unknown'
 
-# Create clusters using if-else statements based on JFH MDL
-print("\nCreating clusters based on JFH MDL comparison...")
-
+# Perform hierarchical clustering
+print("\nPerforming hierarchical clustering on MDL values...")
 # Drop rows with any NaN values
 heatmap_data_clean = heatmap_data.dropna()
-print(f"Languages with complete data: {len(heatmap_data_clean)}")
+print(f"Languages with complete data (before filtering): {len(heatmap_data_clean)}")
 
-# Cluster 1: JFH average MDL is larger than both HC and SPE
-# Cluster 2: all other languages
-clusters_dict = {'1': [], '2': []}
+# Identify rows with zero or near-zero variance (correlation undefined for constant rows)
+variance_threshold = 1e-10
+const_mask = heatmap_data_clean.std(axis=1) <= variance_threshold
+heatmap_data_const = heatmap_data_clean[const_mask]
+heatmap_data_var = heatmap_data_clean[~const_mask]
 
-for language in heatmap_data_clean.index:
-    hc_mdl = heatmap_data_clean.loc[language, 'HC']
-    spe_mdl = heatmap_data_clean.loc[language, 'SPE']
-    jfh_mdl = heatmap_data_clean.loc[language, 'JFH']
-    
-    # Check if JFH is larger than both HC and SPE
-    if jfh_mdl > hc_mdl and jfh_mdl > spe_mdl:
-        clusters_dict['1'].append(language)
-    else:
-        clusters_dict['2'].append(language)
+print(f"Languages with constant MDL across all systems: {len(heatmap_data_const)}")
+print(f"Languages with variable MDL: {len(heatmap_data_var)}")
 
-# Create a mapping of languages to cluster IDs
-lang_to_cluster_var = {}
-for cluster_id, langs in clusters_dict.items():
-    for lang in langs:
-        lang_to_cluster_var[lang] = int(cluster_id)
+if len(heatmap_data_const) > 0:
+    print(f"  Constant languages: {', '.join(heatmap_data_const.index.tolist()[:10])}{'...' if len(heatmap_data_const) > 10 else ''}")
 
-n_clusters_var = 2
-print(f"Number of clusters: {n_clusters_var}")
-print(f"Clustering method: If-else based on JFH MDL > HC MDL AND JFH MDL > SPE MDL")
+# Compute pairwise correlation distance (1 - Pearson r) for variable rows only
+# This clusters by pattern shape, not absolute magnitude
+print("Computing correlation distance matrix for variable languages...")
+D = pdist(heatmap_data_var.values, metric='correlation')
+
+# Check for NaN or inf values in distance matrix
+if np.any(~np.isfinite(D)):
+    print(f"Warning: Found {np.sum(~np.isfinite(D))} non-finite values in distance matrix")
+    print("Attempting to handle by replacing non-finite values with max distance...")
+    D = np.where(np.isfinite(D), D, np.nanmax(D[np.isfinite(D)]))
+
+# Compute linkage matrix using average linkage (pattern-based clustering)
+print("Computing linkage with average method...")
+row_linkage = linkage(D, method='average')
+
+# Evaluate different numbers of clusters using silhouette score
+print("\nEvaluating silhouette scores for K=5 to K=12...")
+k_values = range(2, 9)
+silhouette_scores = []
+
+for k in k_values:
+    cluster_labels_test = fcluster(row_linkage, k, criterion='maxclust')
+    # Use correlation distance for silhouette score calculation
+    sil_score = silhouette_score(heatmap_data_var.values, cluster_labels_test, metric='correlation')
+    silhouette_scores.append(sil_score)
+    print(f"  K={k}: Silhouette Score = {sil_score:.4f}")
+
+# Plot silhouette scores
+fig, ax = plt.subplots(figsize=(10, 6))
+ax.plot(k_values, silhouette_scores, 'bo-', linewidth=2, markersize=8)
+ax.set_xlabel('Number of Clusters (K)', fontsize=12, fontweight='bold')
+ax.set_ylabel('Silhouette Score', fontsize=12, fontweight='bold')
+ax.grid(True, alpha=0.3)
+ax.set_xticks(k_values)
+
+# Add value labels on points
+for k, score in zip(k_values, silhouette_scores):
+    ax.text(k, score + 0.01, f'{score:.3f}', ha='center', va='bottom', fontsize=9)
+
+plt.tight_layout()
+plt.savefig('silhouette_scores.png', dpi=300, bbox_inches='tight')
+print("\n[OK] Silhouette scores plot saved as: silhouette_scores.png")
+plt.close()
+
+# Cut dendrogram to form exactly 8 clusters (for variable languages)
+n_clusters_var = 4
+cluster_labels_var = fcluster(row_linkage, n_clusters_var, criterion='maxclust')
+
+# Create a mapping of languages to cluster IDs for variable rows
+lang_to_cluster_var = dict(zip(heatmap_data_var.index, cluster_labels_var))
+
+print(f"Number of clusters (for variable languages): {n_clusters_var}")
+print(f"Clustering method: Correlation distance + Average linkage (pattern-based)")
+
+# Group languages by cluster (including constant rows as a separate category)
+clusters_dict = {}
+for lang, cluster_id in lang_to_cluster_var.items():
+    if cluster_id not in clusters_dict:
+        clusters_dict[cluster_id] = []
+    clusters_dict[cluster_id].append(lang)
+
+# Add constant languages as a special cluster
+if len(heatmap_data_const) > 0:
+    clusters_dict['constant'] = heatmap_data_const.index.tolist()
 
 # Print cluster composition
 print("\nCluster composition:")
-for cluster_id in sorted(clusters_dict.keys()):
+for cluster_id in sorted(clusters_dict.keys(), key=lambda x: (isinstance(x, str), x)):
     langs = sorted(clusters_dict[cluster_id])
-    print(f"  Cluster {cluster_id}: {len(langs)} languages - {', '.join(langs[:5])}{'...' if len(langs) > 5 else ''}")
-
-# Store heatmap_data_const and heatmap_data_var for compatibility with rest of code
-heatmap_data_const = pd.DataFrame()  # Empty since we're not using constant cluster anymore
-heatmap_data_var = heatmap_data_clean
+    print(f"  {'Constant (all MDL equal)' if cluster_id == 'constant' else f'Cluster {cluster_id}'}: {len(langs)} languages - {', '.join(langs[:5])}{'...' if len(langs) > 5 else ''}")
 
 # Create output directory for cluster plots
 cluster_dir = "language_clusters"
@@ -142,8 +189,8 @@ os.makedirs(cluster_dir)
 # Generate separate heatmap for each category
 print("\nGenerating separate heatmaps for each cluster...")
 
-# Sort cluster keys: integers first
-sorted_cluster_ids = sorted([k for k in clusters_dict.keys()])
+# Sort cluster keys: integers first (1-8), then 'constant' at the end
+sorted_cluster_ids = sorted([k for k in clusters_dict.keys() if k != 'constant']) + (['constant'] if 'constant' in clusters_dict else [])
 
 for cluster_id in sorted_cluster_ids:
     langs_in_cluster = sorted(clusters_dict[cluster_id])
@@ -327,9 +374,14 @@ for cluster_id in sorted_cluster_ids:
     ax.set_ylabel('Average MDL', fontsize=12, fontweight='bold')
     
     # Set title based on cluster type
-    ax.set_title(f'Cluster {cluster_id} ({len(langs_in_cluster)} languages)', 
-                 fontsize=12, fontweight='bold', pad=15)
-    safe_name = f'cluster_{cluster_id}'
+    if cluster_id == 'constant':
+        ax.set_title(f'Constant (all MDL equal) - {len(langs_in_cluster)} languages', 
+                     fontsize=12, fontweight='bold', pad=15)
+        safe_name = 'constant'
+    else:
+        ax.set_title(f'Cluster {cluster_id} ({len(langs_in_cluster)} languages)', 
+                     fontsize=12, fontweight='bold', pad=15)
+        safe_name = f'cluster_{cluster_id:02d}'
     
     # Add p-value annotation box if sample size is sufficient
     if len(hc_data) > 2 and len(spe_data) > 2 and len(jfh_data) > 2:
@@ -352,7 +404,10 @@ for cluster_id in sorted_cluster_ids:
     plt.close()
     
     # Print statistical results for this cluster
-    print(f"\n  Cluster {cluster_id} statistics:")
+    if cluster_id == 'constant':
+        print(f"\n  Constant cluster statistics:")
+    else:
+        print(f"\n  Cluster {cluster_id} statistics:")
     
     for i, (inv1, inv2, data1, data2, _, _) in enumerate(pairs_to_test):
         p_adj = pvals_corrected[i]
@@ -588,16 +643,16 @@ print(f"\nDataset shape: {df_lang.shape}")
 print(f"  Languages: {len(df_lang)}")
 print(f"  Phoneme features: {len(all_phonemes)}")
 print(f"  Cluster distribution:")
-for cid in sorted(df_lang['cluster'].unique()):
+for cid in sorted(df_lang['cluster'].unique(), key=lambda x: (isinstance(x, str), x)):
     count = (df_lang['cluster'] == cid).sum()
-    print(f"    Cluster {cid}: {count} languages")
+    print(f"    {'Constant' if cid == 'constant' else f'Cluster {cid}'}: {count} languages")
 
 # Perform contingency table analysis for each phoneme
 print("\nPerforming contingency table analysis for each phoneme...")
 
-# Use all clusters (no filtering out 'constant' anymore)
-df_lang_filtered = df_lang.copy()
-cluster_ids_filtered = sorted(df_lang_filtered['cluster'].unique())
+# Filter out constant cluster
+df_lang_filtered = df_lang[df_lang['cluster'] != 'constant'].copy()
+cluster_ids_filtered = sorted([c for c in df_lang_filtered['cluster'].unique() if c != 'constant'])
 
 print(f"Number of clusters (excluding constant): {len(cluster_ids_filtered)}")
 for cid in cluster_ids_filtered:
@@ -612,7 +667,7 @@ elif len(cluster_ids_filtered) == 2:
     print("\n[OK] Exactly 2 clusters detected. Applying Fisher's exact test...")
     
     cluster_1, cluster_2 = cluster_ids_filtered[0], cluster_ids_filtered[1]
-    print(f"Comparing Cluster {cluster_1} (JFH > HC & JFH > SPE) vs Cluster {cluster_2} (others)")
+    print(f"Comparing Cluster {cluster_1} vs Cluster {cluster_2}")
     
     contingency_results = []
     p_values_raw = []
