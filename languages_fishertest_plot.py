@@ -7,6 +7,7 @@ import os
 from scipy.stats import fisher_exact
 from statsmodels.stats.multitest import multipletests
 import shutil
+from scipy.stats import rankdata
 
 # Define inventories
 inventories = ["HC", "SPE", "JFH"]
@@ -19,7 +20,7 @@ for inv in inventories:
         all_data[inv] = json.load(f)
 
 # Load pb_languages_formatted.csv to get language families and organize by language
-pb_languages = pd.read_csv("phonemic_inventories/pb_languages_formatted.csv")
+pb_languages = pd.read_csv("phonemic_inventories/pb_languages_formatted.csv", encoding='utf-8')
 
 print("\n" + "=" * 60)
 print("Creating Language × Feature System MDL Heatmap")
@@ -223,19 +224,48 @@ def permutation_pvalue(x, y, n_perm=5000, seed=0, median=True):
             count += 1
     return (count + 1) / (n_perm + 1)
 
-def rank_biserial_unpaired(x, y):
-    """Compute rank-biserial effect size for unpaired samples."""
-    scores = []
-    for xi in x:
-        for yj in y:
-            if xi > yj:
-                scores.append(1.0)
-            elif xi == yj:
-                scores.append(0.5)
-            else:
-                scores.append(0.0)
-    A = np.mean(scores)
-    return 2 * A - 1  # in [-1,1]
+def paired_signflip_test(diffs, nperm=10000, seed=123, two_sided=True):
+    diffs = np.asarray(diffs, dtype=np.float64)
+    obs = np.median(diffs)
+    rng = np.random.default_rng(seed)
+    n = len(diffs)
+    perm_medians = np.empty(nperm, dtype=np.float64)
+    for i in range(nperm):
+        signs = rng.choice([-1, 1], size=n)
+        perm_medians[i] = np.median(signs * diffs)
+    if two_sided:
+        count = np.sum(np.abs(perm_medians) >= abs(obs))
+    else:
+        count = np.sum(perm_medians >= obs)
+    print(f"Observed median difference: {obs}")
+    print(f"Permutation medians (first 10): {perm_medians[:10]}")
+    print(f"Number of permutations with median >= observed: {count} out of {nperm}")
+    return (count + 1) / (nperm + 1)
+
+def rank_biserial_paired(x, y):
+    """Compute paired rank-biserial correlation (Wilcoxon effect size)."""
+    
+    diffs = np.asarray(x) - np.asarray(y)
+    
+    # Remove zero differences
+    nonzero = diffs != 0
+    diffs = diffs[nonzero]
+    
+    N = len(diffs)
+    if N < 1:
+        return np.nan
+    
+    # Rank absolute differences
+    abs_diffs = np.abs(diffs)
+    ranks = rankdata(abs_diffs)
+    
+    # Sum of ranks for positive differences
+    R_plus = np.sum(ranks[diffs > 0])
+    
+    # Rank-biserial correlation
+    r = (2 * R_plus) / (N * (N + 1)) - 1
+    
+    return r
 
 def p_to_stars(p):
     """Map corrected p-value to significance stars."""
@@ -273,11 +303,11 @@ for cluster_id in sorted_cluster_ids:
     
     # Prepare data for violin plot: reshape to long format (cluster_data already has weighted averages)
     violin_data_list = []
-    for feature_system in inventories:
-        mdl_values = cluster_data[feature_system].values
+    for inv in inventories:
+        mdl_values = cluster_data[inv].values
         for mdl_val in mdl_values:
             violin_data_list.append({
-                'Feature System': feature_system,
+                'Feature System': inv,
                 'Average MDL': mdl_val
             })
     
@@ -299,7 +329,7 @@ for cluster_id in sorted_cluster_ids:
     effect_sizes = []
     for inv1, inv2, data1, data2, _, _ in pairs_to_test:
         p_val = permutation_pvalue(data1, data2, n_perm=5000, seed=42)
-        r_pair = rank_biserial_unpaired(data1, data2)
+        r_pair = rank_biserial_paired(data1, data2)
         pvals_raw.append(p_val)
         effect_sizes.append(r_pair)
     
@@ -450,7 +480,7 @@ pvals_raw_global = []
 effect_sizes_global = []
 for inv1, inv2, data1, data2, _, _ in pairs_global:
     p_val = permutation_pvalue(data1, data2, n_perm=5000, seed=42)
-    r_pair = rank_biserial_unpaired(data1, data2)
+    r_pair = rank_biserial_paired(data1, data2)
     pvals_raw_global.append(p_val)
     effect_sizes_global.append(r_pair)
 
@@ -771,7 +801,7 @@ for phoneme in significant_phonemes:
                     for feat in mindesc:
                         features.add(feat.strip('+-'))
                 
-                features = list(features)  # Convert back to list
+                features = list(features) 
                 
                 # Get min_lengths for each feature and compute average
                 feature_lengths = []
@@ -864,6 +894,40 @@ for phoneme in significant_phonemes:
         
         violin_mdl_df = pd.DataFrame(violin_mdl_data)
         
+        # Perform pairwise Monte-Carlo permutation tests between feature systems
+        hc_mdl_vals = mdl_arrays_per_inv[0]
+        spe_mdl_vals = mdl_arrays_per_inv[1]
+        jfh_mdl_vals = mdl_arrays_per_inv[2]
+        
+        pairwise_tests = [
+            ('HC', 'SPE', hc_mdl_vals, spe_mdl_vals),
+            ('SPE', 'JFH', spe_mdl_vals, jfh_mdl_vals),
+            ('HC', 'JFH', hc_mdl_vals, jfh_mdl_vals)
+        ]
+        
+        pvals_raw_mdl = []
+        effect_sizes_mdl = []
+        for inv1, inv2, data1, data2 in pairwise_tests:
+            if len(data1) > 2 and len(data2) > 2:
+                p_val = permutation_pvalue(data1, data2, n_perm=5000, seed=42)
+                r_pair = rank_biserial_paired(data1, data2)
+                pvals_raw_mdl.append(p_val)
+                effect_sizes_mdl.append(r_pair)
+            else:
+                pvals_raw_mdl.append(np.nan)
+                effect_sizes_mdl.append(np.nan)
+        
+        # Apply Benjamini-Hochberg FDR correction
+        pvals_array_mdl = np.array(pvals_raw_mdl)
+        valid_indices = ~np.isnan(pvals_array_mdl)
+        if valid_indices.sum() > 0:
+            pvals_valid = pvals_array_mdl[valid_indices]
+            rejected_mdl, pvals_corrected_mdl_valid, _, _ = multipletests(pvals_valid, alpha=0.05, method='fdr_bh')
+            pvals_corrected_mdl = np.full_like(pvals_array_mdl, np.nan)
+            pvals_corrected_mdl[valid_indices] = pvals_corrected_mdl_valid
+        else:
+            pvals_corrected_mdl = pvals_array_mdl.copy()
+        
         # Create violin plot
         sns.violinplot(data=violin_mdl_df, x='Feature System', y='MDL', ax=ax_right, 
                         palette=['#1f77b4', '#ff7f0e', '#2ca02c'], inner=None, linewidth=1.5)
@@ -890,6 +954,20 @@ for phoneme in significant_phonemes:
         ax_right.set_ylabel('Average MDL over phoneme features', fontsize=12, fontweight='bold')
         ax_right.grid(True, alpha=0.3, axis='y')
         ax_right.set_axisbelow(True)
+        
+        # Add p-value annotation box for MDL comparisons
+        annotation_mdl_text = '' #'Pairwise MDL Comparisons\n(corrected p-values)\n'
+        for idx, (inv1, inv2, _, _) in enumerate(pairwise_tests):
+            p_adj = pvals_corrected_mdl[idx]
+            if not np.isnan(p_adj):
+                stars = p_to_stars(p_adj)
+                r_val = effect_sizes_mdl[idx]
+                annotation_mdl_text += f'{inv1} vs {inv2}: p={p_adj:.3f} {stars}, r={r_val:.2f}\n'
+        
+        annotation_mdl_text = annotation_mdl_text.rstrip()
+        ax_right.text(0.02, 0.98, annotation_mdl_text, transform=ax_right.transAxes,
+                fontsize=9, verticalalignment='top', horizontalalignment='left',
+                bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8, edgecolor='black', linewidth=1))
         
         # Main title
         fig.suptitle(f'Phoneme /{phoneme}/', 
@@ -944,16 +1022,15 @@ for phoneme in significant_phonemes:
                 'Phoneme Presence': f'With /{phoneme}/',
                 'MDL': mdl_val
             })
+
+        print(f"Collected {len(mdl_values_with)} MDL values for {inv} with phoneme /{phoneme}/")
     
     # ===== COLLECT DATA: Without phoneme (excluding this phoneme's features) =====
     for inv in inventories:
+        # Get the data for this inventory
+        data_inv = all_data[inv]
         mdl_values_excluding = []
-        
-        # For each language in the dataset
-        for language in heatmap_data.index:
-            # Get the data for this inventory
-            data_inv = all_data[inv]
-            
+        for language in languages_with_phoneme:    
             if language in data_inv:
                 lang_data = data_inv[language]
 
@@ -969,7 +1046,7 @@ for phoneme in significant_phonemes:
                 # Store weighted average MDL for this language excluding current phoneme
                 if weighted_avg_mdl_excluding is not None:
                     mdl_values_excluding.append(weighted_avg_mdl_excluding)
-        
+            
         # Add to combined dataframe
         for mdl_val in mdl_values_excluding:
             combined_violin_data.append({
@@ -977,9 +1054,46 @@ for phoneme in significant_phonemes:
                 'Phoneme Presence': f'Without /{phoneme}/',
                 'MDL': mdl_val
             })
+        print(f"Collected {len(mdl_values_excluding)} MDL values for {inv} without phoneme /{phoneme}/")
     
     # Convert to DataFrame
     combined_violin_df = pd.DataFrame(combined_violin_data)
+    
+    # ===== PERFORM STATISTICAL TESTS: With vs Without for each feature system =====
+    pvals_raw_presence = []
+    effect_sizes_presence = []
+    
+    for feature_system in inventories:
+        with_presence_data = combined_violin_df[
+            (combined_violin_df['Feature System'] == feature_system) & 
+            (combined_violin_df['Phoneme Presence'] == f'With /{phoneme}/')
+        ]['MDL'].values
+        
+        without_presence_data = combined_violin_df[
+            (combined_violin_df['Feature System'] == feature_system) & 
+            (combined_violin_df['Phoneme Presence'] == f'Without /{phoneme}/')
+        ]['MDL'].values
+        
+        # Perform permutation test
+        if len(with_presence_data) > 2 and len(without_presence_data) > 2:
+            p_val = permutation_pvalue(with_presence_data, without_presence_data, n_perm=5000, seed=42)
+            r_pair = rank_biserial_paired(with_presence_data, without_presence_data)
+            pvals_raw_presence.append(p_val)
+            effect_sizes_presence.append(r_pair)
+        else:
+            pvals_raw_presence.append(np.nan)
+            effect_sizes_presence.append(np.nan)
+    
+    # Apply Benjamini-Hochberg FDR correction
+    pvals_array_presence = np.array(pvals_raw_presence)
+    valid_indices_presence = ~np.isnan(pvals_array_presence)
+    if valid_indices_presence.sum() > 0:
+        pvals_valid_presence = pvals_array_presence[valid_indices_presence]
+        rejected_presence, pvals_corrected_presence_valid, _, _ = multipletests(pvals_valid_presence, alpha=0.05, method='fdr_bh')
+        pvals_corrected_presence = np.full_like(pvals_array_presence, np.nan)
+        pvals_corrected_presence[valid_indices_presence] = pvals_corrected_presence_valid
+    else:
+        pvals_corrected_presence = pvals_array_presence.copy()
     
     # Create single grouped violin plot
     fig, ax = plt.subplots(figsize=(12, 7))
@@ -1028,6 +1142,20 @@ for phoneme in significant_phonemes:
     ax.set_axisbelow(True)
     ax.set_ylim(1.5, 3.4)
     
+    # # Add p-value annotation box for presence comparisons
+    # annotation_presence_text = '' #'With vs Without /{}/:\n(corrected p-values)\n'.format(phoneme)
+    # for feature_idx, feature_system in enumerate(inventories):
+    #     p_adj = pvals_corrected_presence[feature_idx]
+    #     if not np.isnan(p_adj):
+    #         stars = p_to_stars(p_adj)
+    #         r_val = effect_sizes_presence[feature_idx]
+    #         annotation_presence_text += f'{feature_system}: p={p_adj:.3f} {stars}, r={r_val:.2f}\n'
+    
+    # annotation_presence_text = annotation_presence_text.rstrip()
+    # ax.text(0.02, 0.98, annotation_presence_text, transform=ax.transAxes,
+    #         fontsize=9, verticalalignment='top', horizontalalignment='left',
+    #         bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8, edgecolor='black', linewidth=1))
+    
     # Customize legend
     ax.legend(title='Phoneme Presence', fontsize=10, title_fontsize=11, loc='upper right')
     
@@ -1039,5 +1167,195 @@ for phoneme in significant_phonemes:
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.close()
 
+    # ===== COMPUTE MEDIAN DIFFERENCES: Without vs With =====
+    # Compute per-language differences: MDL with phoneme vs without phoneme
+    language_diffs = []
+    
+    for language in languages_with_phoneme:
+        if language in heatmap_data.index:
+            # For each feature system, compute the difference
+            for inv in inventories:
+                # MDL with phoneme (from heatmap_data - language-level average)
+                mdl_with = heatmap_data.loc[language, inv]
+                
+                # MDL without phoneme (computed from all_data)
+                lang_data = all_data[inv][language]
+                min_descriptions = lang_data["min_descriptions"]
+                min_lengths = lang_data["min_lengths"]
+                
+                # Collect all phonemes except the current one
+                allsegments_excluding = [pho for pho in min_descriptions.keys() if pho != phoneme]
+                
+                # Compute weighted average MDL excluding current phoneme
+                mdl_without = compute_weighted_avg_mdl(allsegments_excluding, min_lengths, min_descriptions)
+                
+                if mdl_without is not None:
+                    # Compute difference: with - without
+                    diff = mdl_with - mdl_without
+                    language_diffs.append({
+                        'language': language,
+                        'Feature System': inv,
+                        'Difference (With - Without)': diff
+                    })
+    
+    # Convert to DataFrame
+    diffs_df = pd.DataFrame(language_diffs)
+    
+    # Perform paired sign-flip test for each feature system
+    print(f"\n  Paired sign-flip tests for /{phoneme}/:")
+    
+    for inv in inventories:
+        inv_diffs = diffs_df[diffs_df['Feature System'] == inv]['Difference (With - Without)'].values
+        
+        if len(inv_diffs) > 1:
+            p_val_signflip = paired_signflip_test(inv_diffs, nperm=10000, seed=123, two_sided=True)
+            obs_median = np.median(inv_diffs)
+            stars = p_to_stars(p_val_signflip)
+            print(f"    {inv}: median_diff = {obs_median:.4f}, p_signflip = {p_val_signflip:.4f} {stars}")
+    
+    # Create violin plot showing per-language differences
+    fig_diff, ax_diff = plt.subplots(figsize=(10, 7))
+
+    ax_diff.set_ylim(-0.015, 0.015)
+    
+    # Create violin plot
+    sns.violinplot(data=diffs_df, x='Feature System', y='Difference (With - Without)', ax=ax_diff,
+                   palette=['#1f77b4', '#ff7f0e', '#2ca02c'], inner=None, linewidth=1.5)
+    
+    # Add individual sample points
+    sns.stripplot(data=diffs_df, x='Feature System', y='Difference (With - Without)', ax=ax_diff,
+                  color='black', alpha=0.4, size=4, jitter=True)
+    
+    # Add median lines for each feature system
+    for idx, inv in enumerate(inventories):
+        inv_diffs = diffs_df[diffs_df['Feature System'] == inv]['Difference (With - Without)'].values
+        if len(inv_diffs) > 0:
+            median_diff = np.median(inv_diffs)
+            ax_diff.hlines(median_diff, idx - 0.4, idx + 0.4, colors='darkred', linewidth=2.5, 
+                          label='Median' if idx == 0 else '')
+    
+    # Add zero line
+    ax_diff.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.7)
+    
+    ax_diff.set_ylabel('MDL Difference (With - Without)', fontsize=12, fontweight='bold')
+    ax_diff.set_xlabel('Feature System', fontsize=12, fontweight='bold')
+    ax_diff.set_title(f'Per-Language MDL Differences for /{phoneme}/', fontsize=13, fontweight='bold')
+    ax_diff.grid(True, alpha=0.3, axis='y')
+    ax_diff.set_axisbelow(True)
+    
+    # Add annotation with sample sizes and test results
+    annotation_diff_text = ''
+    for inv in inventories:
+        inv_diffs = diffs_df[diffs_df['Feature System'] == inv]['Difference (With - Without)'].values
+        if len(inv_diffs) > 0:
+            p_val = paired_signflip_test(inv_diffs, nperm=10000, seed=123, two_sided=True)
+            stars = p_to_stars(p_val)
+            annotation_diff_text += f'{inv} (n={len(inv_diffs)}): p={p_val:.3f} {stars}\n'
+    
+    annotation_diff_text = annotation_diff_text.rstrip()
+    ax_diff.text(0.98, 0.97, annotation_diff_text, transform=ax_diff.transAxes,
+                fontsize=10, verticalalignment='top', horizontalalignment='right',
+                bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8, edgecolor='black', linewidth=1.5))
+    
+    plt.tight_layout()
+    
+    # Save median difference plot
+    safe_phoneme_name = phoneme.replace('/', '_').replace(' ', '_')
+    filename_diff = os.path.join(phoneme_plots_dir_heatmap, f'phoneme_{safe_phoneme_name}_per_language_diffs.png')
+    plt.savefig(filename_diff, dpi=300, bbox_inches='tight')
+    plt.close()
+
 print(f"\n[OK] Individual phoneme plots with heatmap_data MDL saved in folder: {phoneme_plots_dir_heatmap}")
 print(f"Total plots created: {len(significant_phonemes)}")
+
+# ============================================================
+# Phoneme Co-occurrence Analysis: Correlation Matrix
+# ============================================================
+print("\n" + "=" * 60)
+print("Phoneme Co-occurrence Analysis")
+print("=" * 60)
+
+# Use the binary phoneme data from df_lang (languages × phonemes matrix)
+phoneme_columns = [col for col in df_lang.columns if col != 'language' and col != 'cluster']
+df_phoneme_matrix = df_lang[phoneme_columns].copy()
+df_phoneme_matrix = df_phoneme_matrix[significant_phonemes]
+
+print(f"\nAnalyzing co-occurrence patterns for {len(significant_phonemes)} phonemes across {len(df_lang)} languages")
+
+# Calculate Pearson correlation between all phonemes
+phoneme_correlation = df_phoneme_matrix.corr(method='pearson')
+
+print(f"Correlation matrix shape: {phoneme_correlation.shape}")
+print(f"\nTop 10 strongest co-occurrence correlations:")
+
+# Extract upper triangle of correlation matrix (to avoid duplicates and self-correlations)
+# Convert to long format
+corr_pairs = []
+for i, phoneme1 in enumerate(phoneme_correlation.columns):
+    for j, phoneme2 in enumerate(phoneme_correlation.columns):
+        if i < j:  # Upper triangle only
+            corr_value = phoneme_correlation.loc[phoneme1, phoneme2]
+            corr_pairs.append({
+                'phoneme_1': phoneme1,
+                'phoneme_2': phoneme2,
+                'correlation': corr_value
+            })
+
+# Sort by absolute correlation value (strongest associations)
+corr_pairs_sorted = sorted(corr_pairs, key=lambda x: abs(x['correlation']), reverse=True)
+
+for idx, pair in enumerate(corr_pairs_sorted[:10], 1):
+    print(f"  {idx:2d}. /{pair['phoneme_1']}/ <-> /{pair['phoneme_2']}/: r = {pair['correlation']:+.3f}")
+
+# Find strongest positive and negative correlations
+print(f"\nTop 5 positive correlations (phonemes that tend to co-occur):")
+positive_corrs = [p for p in corr_pairs_sorted if p['correlation'] > 0]
+for idx, pair in enumerate(positive_corrs[:5], 1):
+    print(f"  {idx}. /{pair['phoneme_1']}/ <-> /{pair['phoneme_2']}/: r = {pair['correlation']:+.3f}")
+
+print(f"\nTop 5 negative correlations (phonemes that tend to exclude each other):")
+negative_corrs = sorted([p for p in corr_pairs_sorted if p['correlation'] < 0], 
+                        key=lambda x: x['correlation'])  # Most negative first
+for idx, pair in enumerate(negative_corrs[:5], 1):
+    print(f"  {idx}. /{pair['phoneme_1']}/ <-> /{pair['phoneme_2']}/: r = {pair['correlation']:+.3f}")
+
+# Calculate some basic co-occurrence statistics
+print(f"\nCo-occurrence statistics:")
+print(f"  Mean correlation: {phoneme_correlation.values[np.triu_indices_from(phoneme_correlation.values, k=1)].mean():.3f}")
+print(f"  Median correlation: {np.median(phoneme_correlation.values[np.triu_indices_from(phoneme_correlation.values, k=1)]):.3f}")
+print(f"  Std Dev of correlations: {phoneme_correlation.values[np.triu_indices_from(phoneme_correlation.values, k=1)].std():.3f}")
+
+# Create visualization: heatmap of correlations for significant phonemes
+print(f"\nGenerating correlation heatmap for {len(significant_phonemes)} significant phonemes...")
+
+corr_subset = phoneme_correlation
+
+# Getting the Upper Triangle of the co-relation matrix
+mask = np.triu(corr_subset)
+
+# Create figure
+fig, ax = plt.subplots(figsize=(14, 12))
+
+# Create heatmap
+sns.heatmap(corr_subset, cmap='RdBu_r', center=0, annot=False, fmt='.2f', mask=mask,
+            square=True, linewidths=0.5, linecolor='gray', cbar_kws={'label': 'Pearson Correlation'},
+            vmin=-1, vmax=1, ax=ax)
+
+# Customize labels
+ax.set_xticklabels([f'/{ph}/' for ph in significant_phonemes], rotation=45, ha='right', fontsize=9)
+ax.set_yticklabels([f'/{ph}/' for ph in significant_phonemes], rotation=0, fontsize=9)
+
+ax.set_title(f'Phoneme Co-occurrence Correlation Matrix\n({len(significant_phonemes)} Significant Phonemes)', 
+             fontsize=13, fontweight='bold', pad=15)
+
+plt.tight_layout()
+plt.savefig('phoneme_cooccurrence_correlation.png', dpi=300, bbox_inches='tight')
+plt.close()
+
+print(f"[OK] Correlation heatmap saved as: phoneme_cooccurrence_correlation.png")
+
+# Save correlation results to CSV
+df_corr_results = pd.DataFrame(corr_pairs)
+df_corr_results = df_corr_results.sort_values(by='correlation', key=lambda x: abs(x), ascending=False).reset_index(drop=True)
+df_corr_results.to_csv('phoneme_cooccurrence_correlation_results.csv', index=False)
+print(f"[OK] Correlation results saved as: phoneme_cooccurrence_correlation_results.csv")

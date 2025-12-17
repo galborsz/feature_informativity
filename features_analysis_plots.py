@@ -340,7 +340,7 @@ if __name__ == "__main__":
     
     # List of phonemes to analyze
     # You can modify this list or pass specific phonemes as arguments
-    phonemes_to_analyze = ['õ']
+    phonemes_to_analyze = ['tʃ', 'l', 'ɛ', 'ɔ', 'ẽ', 'ũ', 'õ']
     
     print(f"\nGenerating stacked bar plots for {len(phonemes_to_analyze)} phonemes...")
     
