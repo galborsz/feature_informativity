@@ -50,10 +50,11 @@ def create_phoneme_feature_analysis_plot(phoneme, output_dir="phoneme_feature_an
                 features_set = set()
                 for mindesc in feature_desc:
                     for feat in mindesc:
-                        features_set.add(feat.strip('+-'))
+                        if len(feat) > 0 and feat[0] == '+':
+                            features_set.add(feat.strip('+'))
                 
                 features_list = list(features_set)
-                
+
                 # Get min_lengths for each feature
                 for feature in features_list:
                     if feature in min_lengths:
@@ -222,7 +223,8 @@ def create_phoneme_upset_plot(phoneme, output_dir="phoneme_feature_analysis_plot
                 features_set = set()
                 for mindesc in feature_desc:
                     for feat in mindesc:
-                        features_set.add(feat.strip('+-'))
+                        if feat[0] == '+':
+                            features_set.add(feat.strip('+'))
                 
                 # Get MDL values for each feature
                 for feature in features_set:
@@ -352,11 +354,11 @@ if __name__ == "__main__":
     
     print(f"\nGenerating feature combination plots (UpSet-style) for {len(phonemes_to_analyze)} phonemes...")
     
-    for phoneme in phonemes_to_analyze:
-        try:
-            create_phoneme_upset_plot(phoneme)
-        except Exception as e:
-            print(f"  Error creating feature combination plot for phoneme /{phoneme}/: {str(e)}")
+    # for phoneme in phonemes_to_analyze:
+    #     try:
+    #         create_phoneme_upset_plot(phoneme)
+    #     except Exception as e:
+    #         print(f"  Error creating feature combination plot for phoneme /{phoneme}/: {str(e)}")
     
     print("\n" + "=" * 60)
     print("Feature Analysis Complete")
