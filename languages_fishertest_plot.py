@@ -494,13 +494,18 @@ fig, ax = plt.subplots(figsize=(10, 7))
 # Set y-axis with fixed range
 ax.set_ylim(1.5, 3.4)
 
+# Set y-axis ticks with 0.5 interval and one decimal place
+ax.set_yticks([2.0, 2.5, 3.0])
+ax.set_yticklabels(['2.0', '2.5', '3.0'], fontsize=12)
+
 # Create violin plot with median line
-sns.violinplot(data=global_violin_df, x='Feature System', y='Average MDL', ax=ax, 
-               palette='Set2', inner=None, linewidth=1.5, scale='width')
+sns.violinplot(x=global_violin_df[global_violin_df['Average MDL'] < 2.7]['Feature System'], y=global_violin_df[global_violin_df['Average MDL'] < 2.7]['Average MDL'], ax=ax, color=".8",
+                #alpha=0.8, palette='Set2',
+                inner=None, linewidth=3, scale='width')
 
 # Add individual sample points
-sns.stripplot(data=global_violin_df, x='Feature System', y='Average MDL', ax=ax,
-              color='black', alpha=0.4, size=4, jitter=True)
+sns.stripplot(data=global_violin_df, x='Feature System', y='Average MDL', ax=ax, alpha=0.7,
+              palette=['#1f77b4', '#ff7f0e', '#2ca02c'], size=6, jitter=True)
 
 # Add median lines for each feature system with standard width for global plot
 medians_global = [np.median(hc_global), np.median(spe_global), np.median(jfh_global)]
@@ -508,29 +513,42 @@ for i, median_val in enumerate(medians_global):
     ax.hlines(median_val, i - 0.4, i + 0.4, colors='darkred', linewidth=2.5, label='Median' if i == 0 else '')
 
 # Set labels and title
-ax.set_xlabel('Feature System', fontsize=12, fontweight='bold')
-ax.set_ylabel('Average MDL', fontsize=12, fontweight='bold')
+ax.set_xlabel('Feature System', fontsize=14) # , fontweight='bold'
+ax.set_ylabel('Average Minimal Description Length (MDL)', fontsize=14) # , fontweight='bold'
 
-# Add p-value annotation box if sample size is sufficient
+# Set x-axis tick labels to be bigger and bold
+ax.set_xticklabels(['HC', 'SPE', 'JFH'], fontsize=14, fontweight='bold')
+
+# Add significance lines with stars connecting compared distributions
 if len(hc_global) > 2 and len(spe_global) > 2 and len(jfh_global) > 2:
-    # Find y-axis range for adjustment if needed
-    max_y_global = max([np.max(hc_global), np.max(spe_global), np.max(jfh_global)])
-    min_y_global = min([np.min(hc_global), np.min(spe_global), np.min(jfh_global)])
-    data_range_global = max_y_global - min_y_global
+    # Calculate y positions for significance lines
+    max_y = ax.get_ylim()[1]
+    line_y_positions = [
+        max_y - 0.13,  # HC vs SPE
+        max_y - 0.26,  # SPE vs JFH
+        max_y - 0.39   # HC vs JFH
+    ]
     
-    annotation_text_global = ''
+    # Tail parameters
+    tail_length = 0.015  # Shorter length of vertical tails at each end
+    
+    # Draw significance lines for each pairwise comparison
     for i, (inv1, inv2, data1, data2, pos1, pos2) in enumerate(pairs_global):
         p_adj = pvals_corrected_global[i]
         stars = p_to_stars(p_adj)
-        annotation_text_global += f'{inv1} vs {inv2}: {p_adj:.3f} {stars}\n'
-    
-    annotation_text_global = annotation_text_global.rstrip()
-
-    
-    # Add annotation box
-    ax.text(0.98, 0.97, annotation_text_global, transform=ax.transAxes,
-            fontsize=10, verticalalignment='top', horizontalalignment='right',
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8, edgecolor='black', linewidth=1))
+        line_y = line_y_positions[i]
+        
+        # Draw horizontal line connecting the two distributions
+        ax.plot([pos1, pos2], [line_y, line_y], 'k-', linewidth=2)
+        
+        # Draw tails at the edges
+        ax.plot([pos1, pos1], [line_y - tail_length, line_y], 'k-', linewidth=2)
+        ax.plot([pos2, pos2], [line_y - tail_length, line_y], 'k-', linewidth=2)
+        
+        # Add stars above the line at the midpoint
+        mid_x = (pos1 + pos2) / 2
+        ax.text(mid_x, line_y + 0.015, stars, ha='center', va='bottom', 
+                fontsize=14, fontweight='bold')
 
 plt.tight_layout()
 plt.savefig('global_violin_all_languages.png', dpi=300, bbox_inches='tight')
