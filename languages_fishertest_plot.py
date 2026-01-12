@@ -294,14 +294,7 @@ for cluster_id in sorted_cluster_ids:
     langs_in_cluster = sorted(clusters_dict[cluster_id])
     cluster_data = heatmap_data.loc[langs_in_cluster]
     
-    # Calculate scale factor based on cluster size
-    # Find the maximum cluster size to normalize
-    max_cluster_size = max(len(clusters_dict[cid]) for cid in sorted_cluster_ids)
-    cluster_size = len(langs_in_cluster)
-    # Scale violin width from 0.3 to 1.0 based on cluster size
-    violin_scale = 0.3 + (cluster_size / max_cluster_size) * 0.7
-    
-    # Prepare data for violin plot: reshape to long format (cluster_data already has weighted averages)
+    # Prepare data for violin plot: reshape to long format
     violin_data_list = []
     for inv in inventories:
         mdl_values = cluster_data[inv].values
@@ -340,44 +333,74 @@ for cluster_id in sorted_cluster_ids:
     # Create figure for violin plot
     fig, ax = plt.subplots(figsize=(10, 7))
     
-    # Create violin plot with median line
-    sns.violinplot(data=violin_df, x='Feature System', y='Average MDL', ax=ax, 
-                   palette='Set2', inner=None, linewidth=1.5, scale_hue=False, width=violin_scale)
-    
-    # Add individual sample points
-    sns.stripplot(data=violin_df, x='Feature System', y='Average MDL', ax=ax,
-                  color='black', alpha=0.4, size=4, jitter=True)
-    
-    # Add median lines for each feature system with width matching violin scale
-    medians = [np.median(cluster_data[inv].values) for inv in inventories]
-    median_width = violin_scale * 0.8  # Scale median line width proportionally
-    for i, median_val in enumerate(medians):
-        ax.hlines(median_val, i - (violin_scale/2), i + (violin_scale/2), colors='darkred', linewidth=2.5, label='Median' if i == 0 else '')
-    
-    # Set consistent y-axis range across all clusters
+    # Set y-axis with fixed range
     ax.set_ylim(1.5, 3.4)
     
+    # Set y-axis ticks with 0.5 interval and one decimal place
+    ax.set_yticks([2.0, 2.5, 3.0])
+    ax.set_yticklabels(['2.0', '2.5', '3.0'], fontsize=12)
+    
+    # Create violin plot with median line
+    sns.violinplot(x=violin_df[violin_df['Average MDL'] < 2.7]['Feature System'], y=violin_df[violin_df['Average MDL'] < 2.7]['Average MDL'], ax=ax, color=".8",
+                   inner=None, linewidth=3, scale='width')
+    
+    # Add individual sample points
+    sns.stripplot(data=violin_df, x='Feature System', y='Average MDL', ax=ax, alpha=0.7,
+                  palette=['#1f77b4', '#ff7f0e', '#2ca02c'], size=6, jitter=True)
+    
+    # Add median lines for each feature system with standard width
+    medians = [np.median(hc_data), np.median(spe_data), np.median(jfh_data)]
+    for i, median_val in enumerate(medians):
+        ax.hlines(median_val, i - 0.4, i + 0.4, colors='darkred', linewidth=2.5, label='Median' if i == 0 else '')
+    
     # Set labels and title
-    ax.set_xlabel('Feature System', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Average MDL', fontsize=12, fontweight='bold')
+    ax.set_xlabel('Feature System', fontsize=14)
+    ax.set_ylabel('Average Minimal Description Length (MDL)', fontsize=14)
+    ax.set_xticklabels(['HC', 'SPE', 'JFH'], fontsize=14, fontweight='bold')
     
     # Set title based on cluster type
     ax.set_title(f'Cluster {cluster_id} ({len(langs_in_cluster)} languages)', 
                  fontsize=12, fontweight='bold', pad=15)
-    safe_name = f'cluster_{cluster_id}'
     
-    # Add p-value annotation box if sample size is sufficient
+    # Add significance lines with stars connecting compared distributions
     if len(hc_data) > 2 and len(spe_data) > 2 and len(jfh_data) > 2:
-        annotation_text = '' # Pairwise Comparisons\n(corrected p-values)\n
+        # Calculate y positions for significance lines
+        max_y = ax.get_ylim()[1]
+        # Calculate y positions for significance lines, accounting for only significant comparisons
+        line_y_positions = []
+        line_offset = 0.36
+        for i, (inv1, inv2, data1, data2, pos1, pos2) in enumerate(pairs_to_test):
+            p_adj = pvals_corrected[i]
+            if p_adj < 0.05:  # Only significant comparisons get a line
+                line_y_positions.append(max_y - line_offset)
+                line_offset -= 0.13
+            else:
+                line_y_positions.append(None)  # No line for non-significant comparisons
+        
+        # Tail parameters
+        tail_length = 0.015
+        
+        # Draw significance lines for each pairwise comparison (only if significant)
         for i, (inv1, inv2, data1, data2, pos1, pos2) in enumerate(pairs_to_test):
             p_adj = pvals_corrected[i]
             stars = p_to_stars(p_adj)
-            annotation_text += f'{inv1} vs {inv2}: {p_adj:.3f} {stars}\n'
-        
-        annotation_text = annotation_text.rstrip()
-        ax.text(0.98, 0.97, annotation_text, transform=ax.transAxes,
-                fontsize=10, verticalalignment='top', horizontalalignment='right',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8, edgecolor='black', linewidth=1))
+            
+            # Only draw line and stars if significant (p < 0.05)
+            if p_adj < 0.05:
+                line_y = line_y_positions[i]
+                
+                # Draw horizontal line connecting the two distributions
+                ax.plot([pos1, pos2], [line_y, line_y], 'k-', linewidth=2)
+                
+                # Draw tails at the edges
+                ax.plot([pos1, pos1], [line_y - tail_length, line_y], 'k-', linewidth=2)
+                ax.plot([pos2, pos2], [line_y - tail_length, line_y], 'k-', linewidth=2)
+                
+                # Add stars above the line at the midpoint
+                mid_x = (pos1 + pos2) / 2
+                ax.text(mid_x, line_y + 0.015, stars, ha='center', va='bottom', 
+                        fontsize=14, fontweight='bold')
+    safe_name = f'cluster_{cluster_id}'
     
     plt.tight_layout()
     
