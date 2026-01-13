@@ -335,6 +335,9 @@ for cluster_id in sorted_cluster_ids:
     
     # Set y-axis with fixed range
     ax.set_ylim(1.5, 3.4)
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
     
     # Set y-axis ticks with 0.5 interval and one decimal place
     ax.set_yticks([2.0, 2.5, 3.0])
@@ -342,7 +345,7 @@ for cluster_id in sorted_cluster_ids:
     
     # Create violin plot with median line
     sns.violinplot(x=violin_df[violin_df['Average MDL'] < 2.7]['Feature System'], y=violin_df[violin_df['Average MDL'] < 2.7]['Average MDL'], ax=ax, color=".8",
-                   inner=None, linewidth=3, scale='width')
+                   inner=None, linewidth=2.5, scale='width') # , scale='count' , width=0.8
     
     # Add individual sample points
     sns.stripplot(data=violin_df, x='Feature System', y='Average MDL', ax=ax, alpha=0.7,
@@ -517,6 +520,9 @@ fig, ax = plt.subplots(figsize=(10, 7))
 # Set y-axis with fixed range
 ax.set_ylim(1.5, 3.4)
 
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+
 # Set y-axis ticks with 0.5 interval and one decimal place
 ax.set_yticks([2.0, 2.5, 3.0])
 ax.set_yticklabels(['2.0', '2.5', '3.0'], fontsize=12)
@@ -524,7 +530,7 @@ ax.set_yticklabels(['2.0', '2.5', '3.0'], fontsize=12)
 # Create violin plot with median line
 sns.violinplot(x=global_violin_df[global_violin_df['Average MDL'] < 2.7]['Feature System'], y=global_violin_df[global_violin_df['Average MDL'] < 2.7]['Average MDL'], ax=ax, color=".8",
                 #alpha=0.8, palette='Set2',
-                inner=None, linewidth=3, scale='width')
+                inner=None, linewidth=2.5, scale='width')
 
 # Add individual sample points
 sns.stripplot(data=global_violin_df, x='Feature System', y='Average MDL', ax=ax, alpha=0.7,
@@ -879,13 +885,17 @@ for phoneme in significant_phonemes:
         
         # Create figure with two subplots
         fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(16, 7))
+        ax_left.spines['top'].set_visible(False)
+        ax_left.spines['right'].set_visible(False)
+        ax_right.spines['top'].set_visible(False)
+        ax_right.spines['right'].set_visible(False)
         
         # ===== LEFT SUBPLOT: Cluster Presence Bar Plot =====
         categories = [category_1_label, category_2_label]
         proportions = [c1_prop, c2_prop]
-        colors = ['#1f77b4', '#ff7f0e']  # Blue and orange
+        colors = ['grey', 'grey']#['#1f77b4', '#ff7f0e']  # Blue and orange
         
-        bars = ax_left.bar(categories, proportions, color=colors, alpha=0.8, edgecolor='black', linewidth=1.5)
+        bars = ax_left.bar(categories, proportions, color=colors, alpha=0.8, edgecolor=None, linewidth=1.5)
         
         # Add value labels on bars
         for bar, prop in zip(bars, proportions):
@@ -900,10 +910,13 @@ for phoneme in significant_phonemes:
             ax_left.text(bar.get_x() + bar.get_width()/2., -0.08,
                     label,
                     ha='center', va='top', fontsize=11, transform=ax_left.get_xaxis_transform())
+
+        # Set x-axis tick labels to be larger and bold
+        ax_left.set_xticklabels(categories, fontsize=14, fontweight='bold')
         
         # Set y-axis limits and labels
         ax_left.set_ylim(0, 1.15)
-        ax_left.set_ylabel('Proportion with phoneme', fontsize=12, fontweight='bold')
+        ax_left.set_ylabel('Proportion of languages with phoneme', fontsize=14) # , fontweight='bold'
         # ax_left.set_title(f'Cluster Presence', fontsize=12, fontweight='bold')
         ax_left.grid(True, alpha=0.3, axis='y')
         ax_left.set_axisbelow(True)
@@ -915,10 +928,10 @@ for phoneme in significant_phonemes:
             stars = p_to_stars(p_val)
             annotation_text = f"p_corr = {p_val:.4f} {stars}\nOR = {or_val:.2f}"
             ax_left.text(0.98, 0.97, annotation_text, transform=ax_left.transAxes,
-                    fontsize=10, verticalalignment='top', horizontalalignment='right',
-                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8, edgecolor='black', linewidth=1.5))
+                    fontsize=11, verticalalignment='top', horizontalalignment='right',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='grey', linewidth=1))
         
-        # ===== RIGHT SUBPLOT: MDL Distribution by Feature System (Violin Plot) =====
+        # ===== RIGHT SUBPLOT: MDL Distribution by Feature System (Box Plot) =====
         mdl_arrays_per_inv = []  # Store raw arrays for statistical testing
         
         # Prepare data for violin plot
@@ -971,7 +984,14 @@ for phoneme in significant_phonemes:
         
         # Create violin plot
         sns.violinplot(data=violin_mdl_df, x='Feature System', y='MDL', ax=ax_right, 
-                        palette=['#1f77b4', '#ff7f0e', '#2ca02c'], inner=None, linewidth=1.5)
+                        palette=['#1f77b4', '#ff7f0e', '#2ca02c'], linewidth=2, inner=None, alpha=0.8) #  boxprops={"alpha": 0.8}, medianprops={"color": "black"}
+        
+        # Set y-axis limits with more space for significance lines
+        ax_right.set_ylim(0.3, 3.7)
+        
+        # Set y-axis ticks with 0.5 interval and one decimal place
+        ax_right.set_yticks([1.0, 1.5, 2.0, 2.5, 3.0])
+        ax_right.set_yticklabels(['1.0', '1.5', '2.0', '2.5', '3.0'], fontsize=12)
         
         # Add individual sample points
         sns.stripplot(data=violin_mdl_df, x='Feature System', y='MDL', ax=ax_right,
@@ -991,24 +1011,57 @@ for phoneme in significant_phonemes:
             ax_right.hlines(median_val, i - 0.4, i + 0.4, colors='darkred', linewidth=2.5, label='Median' if i == 0 else '')
         
         # Set labels and limits
-        ax_right.set_xlabel('Feature System', fontsize=12, fontweight='bold')
-        ax_right.set_ylabel('Average MDL over phoneme features', fontsize=12, fontweight='bold')
+        ax_right.set_xlabel('Feature System', fontsize=14) # , fontweight='bold'
+        ax_right.set_xticklabels(['HC', 'SPE', 'JFH'], fontsize=14, fontweight='bold')
+        ax_right.set_ylabel('Average MDL over phoneme features', fontsize=14)
         ax_right.grid(True, alpha=0.3, axis='y')
         ax_right.set_axisbelow(True)
         
-        # Add p-value annotation box for MDL comparisons
-        annotation_mdl_text = '' #'Pairwise MDL Comparisons\n(corrected p-values)\n'
-        for idx, (inv1, inv2, _, _) in enumerate(pairwise_tests):
-            p_adj = pvals_corrected_mdl[idx]
-            if not np.isnan(p_adj):
+        # Add significance lines with stars connecting compared distributions
+        if len(hc_mdl_vals) > 2 and len(spe_mdl_vals) > 2 and len(jfh_mdl_vals) > 2:
+            # Calculate y positions for significance lines with more space
+            max_y = ax_right.get_ylim()[1]
+            # Calculate y positions for significance lines, accounting for only significant comparisons
+            line_y_positions = []
+            line_offset = 0.45
+            for i, (inv1, inv2, data1, data2) in enumerate(pairwise_tests):
+                p_adj = pvals_corrected_mdl[i]
+                if not np.isnan(p_adj) and p_adj < 0.05:  # Only significant comparisons get a line
+                    line_y_positions.append(max_y - line_offset)
+                    line_offset -= 0.15
+                else:
+                    line_y_positions.append(None)  # No line for non-significant comparisons
+            
+            # Tail parameters
+            tail_length = 0.015
+            
+            # Draw significance lines for each pairwise comparison (only if significant)
+            for i, (inv1, inv2, data1, data2) in enumerate(pairwise_tests):
+                p_adj = pvals_corrected_mdl[i]
                 stars = p_to_stars(p_adj)
-                r_val = effect_sizes_mdl[idx]
-                annotation_mdl_text += f'{inv1} vs {inv2}: p={p_adj:.3f} {stars}, r={r_val:.2f}\n'
-        
-        annotation_mdl_text = annotation_mdl_text.rstrip()
-        ax_right.text(0.02, 0.98, annotation_mdl_text, transform=ax_right.transAxes,
-                fontsize=9, verticalalignment='top', horizontalalignment='left',
-                bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8, edgecolor='black', linewidth=1))
+                
+                # Only draw line and stars if significant (p < 0.05)
+                if not np.isnan(p_adj) and p_adj < 0.05:
+                    line_y = line_y_positions[i]
+                    # Positions for the three feature systems (0, 1, 2)
+                    if inv1 == 'HC' and inv2 == 'SPE':
+                        pos1, pos2 = 0, 1
+                    elif inv1 == 'SPE' and inv2 == 'JFH':
+                        pos1, pos2 = 1, 2
+                    else:  # HC vs JFH
+                        pos1, pos2 = 0, 2
+                    
+                    # Draw horizontal line connecting the two distributions
+                    ax_right.plot([pos1, pos2], [line_y, line_y], 'k-', linewidth=2)
+                    
+                    # Draw tails at the edges
+                    ax_right.plot([pos1, pos1], [line_y - tail_length, line_y], 'k-', linewidth=2)
+                    ax_right.plot([pos2, pos2], [line_y - tail_length, line_y], 'k-', linewidth=2)
+                    
+                    # Add stars above the line at the midpoint
+                    mid_x = (pos1 + pos2) / 2
+                    ax_right.text(mid_x, line_y + 0.025, stars, ha='center', va='bottom', 
+                            fontsize=14, fontweight='bold')
         
         # Main title
         fig.suptitle(f'Phoneme /{phoneme}/', 
