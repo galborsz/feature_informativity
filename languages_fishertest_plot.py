@@ -342,14 +342,14 @@ for cluster_id in sorted_cluster_ids:
     # Set y-axis ticks with 0.5 interval and one decimal place
     ax.set_yticks([2.0, 2.5, 3.0])
     ax.set_yticklabels(['2.0', '2.5', '3.0'], fontsize=12)
-    
+
     # Create violin plot with median line
-    sns.violinplot(x=violin_df[violin_df['Average MDL'] < 2.7]['Feature System'], y=violin_df[violin_df['Average MDL'] < 2.7]['Average MDL'], ax=ax, color=".8",
-                   inner=None, linewidth=2.5, scale='width') # , scale='count' , width=0.8
+    sns.violinplot(x=violin_df[violin_df['Average MDL'] < 2.7]['Feature System'], y=violin_df[violin_df['Average MDL'] < 2.7]['Average MDL'], ax=ax,
+                   palette=['#1f77b4', '#ff7f0e', '#2ca02c'], linewidth=2, inner=None, alpha=0.8)
     
     # Add individual sample points
-    sns.stripplot(data=violin_df, x='Feature System', y='Average MDL', ax=ax, alpha=0.7,
-                  palette=['#1f77b4', '#ff7f0e', '#2ca02c'], size=6, jitter=True)
+    sns.stripplot(data=violin_df, x='Feature System', y='Average MDL', ax=ax,
+                  color='black', alpha=0.4, size=4, jitter=True)
     
     # Add median lines for each feature system with standard width
     medians = [np.median(hc_data), np.median(spe_data), np.median(jfh_data)]
@@ -528,13 +528,12 @@ ax.set_yticks([2.0, 2.5, 3.0])
 ax.set_yticklabels(['2.0', '2.5', '3.0'], fontsize=12)
 
 # Create violin plot with median line
-sns.violinplot(x=global_violin_df[global_violin_df['Average MDL'] < 2.7]['Feature System'], y=global_violin_df[global_violin_df['Average MDL'] < 2.7]['Average MDL'], ax=ax, color=".8",
-                #alpha=0.8, palette='Set2',
-                inner=None, linewidth=2.5, scale='width')
+sns.violinplot(x=global_violin_df[global_violin_df['Average MDL'] < 2.7]['Feature System'], y=global_violin_df[global_violin_df['Average MDL'] < 2.7]['Average MDL'], ax=ax, 
+            palette=['#1f77b4', '#ff7f0e', '#2ca02c'], linewidth=2, inner=None, alpha=0.8)
 
 # Add individual sample points
-sns.stripplot(data=global_violin_df, x='Feature System', y='Average MDL', ax=ax, alpha=0.7,
-              palette=['#1f77b4', '#ff7f0e', '#2ca02c'], size=6, jitter=True)
+sns.stripplot(data=global_violin_df, x='Feature System', y='Average MDL', ax=ax,
+              color='black', alpha=0.4, size=4, jitter=True)
 
 # Add median lines for each feature system with standard width for global plot
 medians_global = [np.median(hc_global), np.median(spe_global), np.median(jfh_global)]
@@ -1023,7 +1022,7 @@ for phoneme in significant_phonemes:
             max_y = ax_right.get_ylim()[1]
             # Calculate y positions for significance lines, accounting for only significant comparisons
             line_y_positions = []
-            line_offset = 0.45
+            line_offset = 0.30
             for i, (inv1, inv2, data1, data2) in enumerate(pairwise_tests):
                 p_adj = pvals_corrected_mdl[i]
                 if not np.isnan(p_adj) and p_adj < 0.05:  # Only significant comparisons get a line
@@ -1236,19 +1235,50 @@ for phoneme in significant_phonemes:
     ax.set_axisbelow(True)
     ax.set_ylim(1.5, 3.4)
     
-    # # Add p-value annotation box for presence comparisons
-    # annotation_presence_text = '' #'With vs Without /{}/:\n(corrected p-values)\n'.format(phoneme)
-    # for feature_idx, feature_system in enumerate(inventories):
-    #     p_adj = pvals_corrected_presence[feature_idx]
-    #     if not np.isnan(p_adj):
-    #         stars = p_to_stars(p_adj)
-    #         r_val = effect_sizes_presence[feature_idx]
-    #         annotation_presence_text += f'{feature_system}: p={p_adj:.3f} {stars}, r={r_val:.2f}\n'
+    # Add significance lines connecting With vs Without for each feature system
+    max_y = ax.get_ylim()[1]
+    line_offset = 0.10
+    tail_length = 0.02
     
-    # annotation_presence_text = annotation_presence_text.rstrip()
-    # ax.text(0.02, 0.98, annotation_presence_text, transform=ax.transAxes,
-    #         fontsize=9, verticalalignment='top', horizontalalignment='left',
-    #         bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8, edgecolor='black', linewidth=1))
+    for feature_idx, feature_system in enumerate(inventories):
+        p_adj = pvals_corrected_presence[feature_idx]
+        
+        # Only draw line if significant (p < 0.05)
+        if not np.isnan(p_adj) and p_adj < 0.05:
+            stars = p_to_stars(p_adj)
+            
+            # Get median values for positioning
+            with_data = combined_violin_df[
+                (combined_violin_df['Feature System'] == feature_system) & 
+                (combined_violin_df['Phoneme Presence'] == f'With /{phoneme}/')
+            ]
+            without_data = combined_violin_df[
+                (combined_violin_df['Feature System'] == feature_system) & 
+                (combined_violin_df['Phoneme Presence'] == f'Without /{phoneme}/')
+            ]
+            
+            if len(with_data) > 0 and len(without_data) > 0:
+                median_with = with_data['MDL'].median()
+                median_without = without_data['MDL'].median()
+                
+                # Position line above both medians
+                line_y = max(median_with, median_without) + line_offset
+                
+                # Draw horizontal line connecting the two distributions
+                # Position slightly left for "With" (around -0.125) and right for "Without" (around +0.125)
+                pos_with = feature_idx - 0.125
+                pos_without = feature_idx + 0.125
+                
+                ax.plot([pos_with, pos_without], [line_y, line_y], 'k-', linewidth=2)
+                
+                # Draw tails at the edges
+                ax.plot([pos_with, pos_with], [line_y - tail_length, line_y], 'k-', linewidth=2)
+                ax.plot([pos_without, pos_without], [line_y - tail_length, line_y], 'k-', linewidth=2)
+                
+                # Add stars above the line at the midpoint
+                mid_x = (pos_with + pos_without) / 2
+                ax.text(mid_x, line_y + 0.02, stars, ha='center', va='bottom', 
+                        fontsize=12, fontweight='bold')
     
     # Customize legend
     ax.legend(title='Phoneme Presence', fontsize=10, title_fontsize=11, loc='upper right')
@@ -1310,11 +1340,14 @@ for phoneme in significant_phonemes:
     # Create violin plot showing per-language differences
     fig_diff, ax_diff = plt.subplots(figsize=(10, 7))
 
-    ax_diff.set_ylim(-0.015, 0.015)
-    
+    ax_diff.set_ylim(-0.025, 0.025)
+
+    ax_diff.spines['top'].set_visible(False)
+    ax_diff.spines['right'].set_visible(False)
+
     # Create violin plot
     sns.violinplot(data=diffs_df, x='Feature System', y='Difference (With - Without)', ax=ax_diff,
-                   palette=['#1f77b4', '#ff7f0e', '#2ca02c'], inner=None, linewidth=1.5)
+                   palette=['#1f77b4', '#ff7f0e', '#2ca02c'], linewidth=2, inner=None, alpha=0.8)
     
     # Add individual sample points
     sns.stripplot(data=diffs_df, x='Feature System', y='Difference (With - Without)', ax=ax_diff,
@@ -1330,26 +1363,32 @@ for phoneme in significant_phonemes:
     
     # Add zero line
     ax_diff.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.7)
-    
-    ax_diff.set_ylabel('MDL Difference (With - Without)', fontsize=12, fontweight='bold')
-    ax_diff.set_xlabel('Feature System', fontsize=12, fontweight='bold')
-    ax_diff.set_title(f'Per-Language MDL Differences for /{phoneme}/', fontsize=13, fontweight='bold')
+    ax_diff.set_xticklabels(['HC', 'SPE', 'JFH'], fontsize=14, fontweight='bold')
+    ax_diff.set_ylabel('MDL Difference (With - Without)', fontsize=14) # , fontweight='bold'
+    ax_diff.set_xlabel('Feature System', fontsize=14)
+    ax_diff.set_title(f'Phoneme /{phoneme}/', fontsize=13, fontweight='bold')
     ax_diff.grid(True, alpha=0.3, axis='y')
     ax_diff.set_axisbelow(True)
     
-    # Add annotation with sample sizes and test results
-    annotation_diff_text = ''
-    for inv in inventories:
+    # Add significance lines with stars for significant differences
+    max_y = ax_diff.get_ylim()[1]
+    
+    for idx, inv in enumerate(inventories):
         inv_diffs = diffs_df[diffs_df['Feature System'] == inv]['Difference (With - Without)'].values
-        if len(inv_diffs) > 0:
+        
+        if len(inv_diffs) > 1:
             p_val = paired_signflip_test(inv_diffs, nperm=10000, seed=123, two_sided=True)
             stars = p_to_stars(p_val)
-            annotation_diff_text += f'{inv} (n={len(inv_diffs)}): p={p_val:.3f} {stars}\n'
-    
-    annotation_diff_text = annotation_diff_text.rstrip()
-    ax_diff.text(0.98, 0.97, annotation_diff_text, transform=ax_diff.transAxes,
-                fontsize=10, verticalalignment='top', horizontalalignment='right',
-                bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8, edgecolor='black', linewidth=1.5))
+            
+            if p_val < 0.05:  # Only add stars for significant results
+                # Get the max value in this distribution to position stars above it
+                max_diff = np.max(inv_diffs)
+                # Position stars 0.003 above the maximum value in the distribution
+                star_y = max_diff + 0.006
+                
+                # Add stars above the distribution
+                ax_diff.text(idx, star_y, stars, ha='center', va='bottom', 
+                            fontsize=16, fontweight='bold')
     
     plt.tight_layout()
     
