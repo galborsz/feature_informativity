@@ -93,6 +93,9 @@ def create_phoneme_feature_analysis_plot(phoneme, output_dir="phoneme_feature_an
     for idx, inv in enumerate(inventories):
         ax = axes[idx]
         df = dfs[inv]
+
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
         
         if len(df) == 0:
             ax.text(0.5, 0.5, f'No data for {inv}', 
@@ -120,7 +123,7 @@ def create_phoneme_feature_analysis_plot(phoneme, output_dir="phoneme_feature_an
         # Create stacked bar plot
         grouped.plot(kind='bar', stacked=True, ax=ax, 
                     color=['#1f77b4', '#ff7f0e', '#2ca02c'], 
-                    width=0.8, edgecolor='black', linewidth=0.5)
+                    width=0.8, edgecolor=None, linewidth=0.5, alpha=0.8)
         
         # Add count annotations on top of each stacked section
         for bar_idx, feature in enumerate(grouped.index):
@@ -128,7 +131,7 @@ def create_phoneme_feature_analysis_plot(phoneme, output_dir="phoneme_feature_an
             for mdl_idx, mdl_val in enumerate([1, 2, 3]):
                 if mdl_val in grouped.columns:
                     count = grouped.loc[feature, mdl_val]
-                    if count > 0:
+                    if count > 7:
                         height = count
                         # Place text at the middle of each section
                         ax.text(bar_idx, cumulative_height + height/2, str(int(count)), 
@@ -136,9 +139,10 @@ def create_phoneme_feature_analysis_plot(phoneme, output_dir="phoneme_feature_an
                         cumulative_height += height
         
         # Customize subplot
-        ax.set_xlabel('Feature', fontsize=11, fontweight='bold')
-        ax.set_ylabel('Language Count', fontsize=11, fontweight='bold')
-        ax.set_title(f'{inv}\n(n={len(df)} points, {df["feature"].nunique()} features)', 
+        ax.set_xlabel('Feature', fontsize=14)
+        ax.set_ylabel('Language Count', fontsize=14)
+        ax.set_xticklabels(grouped.index, rotation=45, ha='right', fontweight='bold', fontsize=12)
+        ax.set_title(f'{inv}\n(n={len(df)} points)', # , {df["feature"].nunique()} features
                     fontsize=11, fontweight='bold')
         
         # Customize legend
@@ -147,9 +151,7 @@ def create_phoneme_feature_analysis_plot(phoneme, output_dir="phoneme_feature_an
         
         ax.grid(True, alpha=0.3, axis='y')
         ax.set_axisbelow(True)
-        
-        # Rotate x-axis labels for readability with proper alignment
-        ax.set_xticklabels(grouped.index, rotation=90, ha='right', fontsize=8)
+
     
     # Main title
     fig.suptitle(f'Phoneme /{phoneme}/ (Total Language Count: {lang_counts_by_inv["HC"]})', 
@@ -337,7 +339,7 @@ def create_phoneme_upset_plot(phoneme, output_dir="phoneme_feature_analysis_plot
 # Example usage: Create plots for multiple phonemes
 if __name__ == "__main__":
     print("\n" + "=" * 60)
-    print("Phoneme Feature Analysis: MDL Stacked Bars and UpSet Plots")
+    print("Phoneme Feature Analysis: MDL Stacked Bars")
     print("=" * 60)
     
     # List of phonemes to analyze
