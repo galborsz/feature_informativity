@@ -1475,8 +1475,50 @@ sns.heatmap(corr_subset, cmap='RdBu_r', center=0, annot=False, fmt='.2f', mask=m
             vmin=-1, vmax=1, ax=ax)
 
 # Customize labels
-ax.set_xticklabels([f'/{ph}/' for ph in significant_phonemes], rotation=45, ha='right', fontsize=9)
-ax.set_yticklabels([f'/{ph}/' for ph in significant_phonemes], rotation=0, fontsize=9)
+phonemes_labels = []
+replacement_map = {
+    '\uf180b': '/ᵐb/',
+    '\uf180v': '/ᵐv/',
+    '\uf180p': '/ᵐp/',
+    '\uf182g': '/ᵑg/',
+    '\uf182gʷ': '/ᵑgʷ/',
+    '\uf182k': '/ᵑk/'
+}
+
+for ph in significant_phonemes:
+    flag = False
+    for ch in ph:
+        if ch == '0':
+            flag = True
+            print('Found 180: ', ph)
+            if ph[-1] == "b":
+                phonemes_labels.append("/ᵐb/")
+                break
+            elif ph[-1] == "v":
+                phonemes_labels.append("/ᵐv/")
+                break
+            elif ph[-1] == "p":
+                phonemes_labels.append("/ᵐp/")
+                break
+        elif ch == '2':
+            flag = True
+            print('Found 182: ', ph)
+            if ph[-1] == "g":
+                phonemes_labels.append("/ᵑg/")
+                break
+            elif ph[-1] == "k":
+                phonemes_labels.append("/ᵑk/")
+                break
+            else:
+                phonemes_labels.append("/ᵑgʷ/")
+                break
+    if not flag:
+        print('Else: ', ph)
+        phonemes_labels.append(f'/{ph}/')
+print(phonemes_labels)
+
+ax.set_xticklabels(phonemes_labels, rotation=45, ha='right', fontsize=9)
+ax.set_yticklabels(phonemes_labels, rotation=0, fontsize=9)
 
 ax.set_title(f'Phoneme Co-occurrence Correlation Matrix\n({len(significant_phonemes)} Significant Phonemes)', 
              fontsize=13, fontweight='bold', pad=15)
