@@ -3,8 +3,9 @@ import json
 import numpy as np
 import pandas as pd
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import random
+import sys
 from statsmodels.stats.multitest import multipletests
 
 # Define inventories
@@ -18,11 +19,19 @@ for inv in inventories:
     with open(filename, 'r') as f:
         all_data[inv] = json.load(f)
 
+# Filter to keep only languages present in ALL inventories
+language_sets = {inv: set(all_data[inv].keys()) for inv in inventories}
+common_languages = set.intersection(*language_sets.values())
+
+# Keep only common languages in all_data
+for inv in inventories:
+    all_data[inv] = {lang: all_data[inv][lang] for lang in common_languages}
+
 # Load pb_languages data
-pb_languages = pd.read_csv("phonemic_inventories/pb_languages_formatted.csv")
+pb_languages = pd.read_csv("phonemic_inventories/pb_languages_formatted.csv", encoding='utf-8')
 
 # Configuration
-NUM_SAMPLES = 1000  # Number of random samples per language (matching Julia)
+NUM_SAMPLES = 1000  
 
 print("\n" + "-" * 60)
 print("Generating random samples and computing informativity...")
@@ -214,7 +223,7 @@ def store_feats(solutions_dict, maxlen_ref, fd, feats, modes):
         thissol.append(modes[idx] + fd[feat]["name"])
     solutions_dict[length_feats].append("[" + ",".join(thissol) + "]")
 
-# Function to compute weighted average MDL (matching Julia's compute_avg_mdl)
+# Function to compute weighted average MDL
 def compute_weighted_avg_mdl(allsegments, min_lengths, min_descriptions):
     """Compute average minimal description length for a set of phonemes."""
     total_avg_length = 0
@@ -251,90 +260,91 @@ def compute_random_sample_mdl(inventory_size, phoneme_pool, featdict, features):
             
     return None
 
-# Collect average MDL per language for each inventory (using simple mean like Plot 2)
-weighted_avg_mdl = {inv: {"Real": [], "Random": []} for inv in inventories}
+# # Collect average MDL per language for each inventory (using simple mean like Plot 2)
+# weighted_avg_mdl = {inv: {"Real": [], "Random": []} for inv in inventories}
 
-print(f"\nUsing ThreadPoolExecutor for parallel processing")
+# print(f"\nUsing ProcessPoolExecutor for parallel processing")
 
-# Process each inventory
-for inv in inventories:
-    print(f"\nProcessing inventory: {inv}")
+# # Process each inventory
+# for inv in inventories:
+#     print(f"\nProcessing inventory: {inv}")
     
-    # Read the feature dictionary for this inventory
-    featdict, all_segments_inv = readinventory(inv)
-    features = list(featdict.keys())
+#     # Read the feature dictionary for this inventory
+#     featdict, all_segments_inv = readinventory(inv)
+#     features = list(featdict.keys())
     
-    lang_count = 0
+#     lang_count = 0
     
-    for language, lang_data in all_data[inv].items():
-        min_lengths = lang_data["min_lengths"]
-        min_descriptions = lang_data["min_descriptions"]
+#     for language, lang_data in all_data[inv].items():
+#         min_lengths = lang_data["min_lengths"]
+#         min_descriptions = lang_data["min_descriptions"]
         
-        # Get the actual phoneme inventory from pb_languages_formatted.csv
-        lang_rows = pb_languages[pb_languages['language'] == language]
-        if lang_rows.empty:
-            continue  # Skip if language not found in CSV
+#         # Get the actual phoneme inventory from pb_languages_formatted.csv
+#         lang_rows = pb_languages[pb_languages['language'] == language]
+#         if lang_rows.empty:
+#             continue  # Skip if language not found in CSV
         
-        inventory_str = lang_rows.iloc[0]["core inventory"]
-        # Parse the inventory string which is in Python list format: ['a', 'b', ...]
-        inventory_str = inventory_str.strip('[]')
-        allsegments_list = [p.strip().strip('\'"') for p in inventory_str.split(',')]
-        allsegments = {p for p in allsegments_list if p and p != ""}
-        inventory_size = len(allsegments)
+#         inventory_str = lang_rows.iloc[0]["core inventory"]
+#         # Parse the inventory string which is in Python list format: ['a', 'b', ...]
+#         inventory_str = inventory_str.strip('[]')
+#         allsegments_list = [p.strip().strip('\'"') for p in inventory_str.split(',')]
+#         allsegments = {p for p in allsegments_list if p and p != ""}
+#         inventory_size = len(allsegments)
         
-        # Compute real average using simple mean (same as Plot 2)
-        if min_lengths:
-            mdl_values_lang = list(min_lengths.values())
-            real_avg_mdl = np.mean(mdl_values_lang)
-            weighted_avg_mdl[inv]["Real"].append(real_avg_mdl)
-            lang_count += 1
+#         # Compute real weighted average MDL
+#         if min_lengths:
+#             # mdl_values_lang = list(min_lengths.values())
+#             # real_avg_mdl = np.mean(mdl_values_lang)
+#             real_avg_mdl = compute_weighted_avg_mdl(allsegments, min_lengths, min_descriptions)
+#             weighted_avg_mdl[inv]["Real"].append(real_avg_mdl)
+#             lang_count += 1
             
-            # Generate NUM_SAMPLES random inventories and compute their average MDL in parallel
-            # with ThreadPoolExecutor(max_workers=4) as executor:
-            #     futures = []
-            #     for sample_num in range(NUM_SAMPLES):
-            #         future = executor.submit(compute_random_sample_mdl, 
-            #                                inventory_size, phoneme_pool, featdict, features)
-            #         futures.append(future)
+#             # Generate NUM_SAMPLES random inventories and compute their average MDL in parallel
+#             with ProcessPoolExecutor(max_workers=4) as executor:
+#                 futures = []
+#                 for sample_num in range(NUM_SAMPLES):
+#                     future = executor.submit(compute_random_sample_mdl, 
+#                                             inventory_size, phoneme_pool, featdict, features)
+#                     futures.append(future)
                 
-            #     sample_avg_mdls = []
-            #     for future in as_completed(futures):
-            #         result = future.result()
-            #         if result is not None:
-            #             sample_avg_mdls.append(result)
+#                 sample_avg_mdls = []
+#                 for future in as_completed(futures):
+#                     result = future.result()
+#                     if result is not None:
+#                         sample_avg_mdls.append(result)
 
-            sample_avg_mdls = []
-            for sample_num in range(NUM_SAMPLES):
-                sample_mdl = compute_random_sample_mdl(inventory_size, phoneme_pool, featdict, features)
-                if sample_mdl is not None:
-                    sample_avg_mdls.append(sample_mdl)
+#             # sample_avg_mdls = []
+#             # for sample_num in range(NUM_SAMPLES):
+#             #     sample_mdl = compute_random_sample_mdl(inventory_size, phoneme_pool, featdict, features)
+#             #     if sample_mdl is not None:
+#             #         sample_avg_mdls.append(sample_mdl)
             
-            # Compute mean of random samples
-            if sample_avg_mdls:
-                mean_random_mdl = np.mean(sample_avg_mdls)
-                weighted_avg_mdl[inv]["Random"].append(mean_random_mdl)
+#             # Compute mean of random samples
+#             if sample_avg_mdls:
+#                 mean_random_mdl = np.mean(sample_avg_mdls)
+#                 weighted_avg_mdl[inv]["Random"].append(mean_random_mdl)
             
-            if lang_count % 10 == 0:
-                print(f"  Processed {lang_count} languages...")
+#             if lang_count % 10 == 0:
+#                 print(f"  Processed {lang_count} languages...")
     
-    print(f"  Processed {lang_count} languages")
-    print(f"  Real samples: {len(weighted_avg_mdl[inv]['Real'])}")
-    print(f"  Random samples: {len(weighted_avg_mdl[inv]['Random'])}")
+#     print(f"  Processed {lang_count} languages")
+#     print(f"  Real samples: {len(weighted_avg_mdl[inv]['Real'])}")
+#     print(f"  Random samples: {len(weighted_avg_mdl[inv]['Random'])}")
 
-# Save weighted_avg_mdl to JSON file
-output_filename = "weighted_avg_mdl_data.json"
-with open(output_filename, 'w') as f:
-    json.dump(weighted_avg_mdl, f, indent=4)
-print(f"\nweighted_avg_mdl data saved to {output_filename}")
+# # Save weighted_avg_mdl to JSON file
+# output_filename = "weighted_avg_mdl_data.json"
+# with open(output_filename, 'w') as f:
+#     json.dump(weighted_avg_mdl, f, indent=4)
+# print(f"\nweighted_avg_mdl data saved to {output_filename}")
 
-# # Load weighted_avg_mdl data from JSON file
-# input_filename = "weighted_avg_mdl_data.json"
-# if os.path.exists(input_filename):
-#     with open(input_filename, 'r') as f:
-#         weighted_avg_mdl = json.load(f)
-#     print(f"\nLoaded weighted_avg_mdl data from {input_filename}")
-# else:
-#     print(f"\nWarning: {input_filename} not found, using computed data")
+# Load weighted_avg_mdl data from JSON file
+input_filename = "weighted_avg_mdl_data.json"
+if os.path.exists(input_filename):
+    with open(input_filename, 'r') as f:
+        weighted_avg_mdl = json.load(f)
+    print(f"\nLoaded weighted_avg_mdl data from {input_filename}")
+else:
+    print(f"\nWarning: {input_filename} not found, using computed data")
 
 # Helper function to count frequencies (equivalent to Julia's count_frequencies)
 def count_frequencies(values, bin_edges):

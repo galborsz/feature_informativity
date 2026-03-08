@@ -19,6 +19,20 @@ for inv in inventories:
     with open(filename, 'r') as f:
         all_data[inv] = json.load(f)
 
+# Filter to keep only languages present in ALL inventories
+language_sets = {inv: set(all_data[inv].keys()) for inv in inventories}
+common_languages = set.intersection(*language_sets.values())
+
+print(f"\nLanguage counts before filtering:")
+for inv in inventories:
+    print(f"  {inv}: {len(language_sets[inv])} languages")
+
+print(f"\nCommon languages across all inventories: {len(common_languages)}")
+
+# Keep only common languages in all_data
+for inv in inventories:
+    all_data[inv] = {lang: all_data[inv][lang] for lang in common_languages}
+
 # Load pb_languages_formatted.csv to get language families and organize by language
 pb_languages = pd.read_csv("phonemic_inventories/pb_languages_formatted.csv", encoding='utf-8')
 

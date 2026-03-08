@@ -181,9 +181,10 @@ if sys.argv[1] == '-v':
 
 inventoryfile = sys.argv[1]
 fd, allsegments = readinventory(inventoryfile) # feature dictionary
-df = pd.read_csv('phonemic_inventories/pb_languages_formatted.csv')
+df = pd.read_csv('phonemic_inventories/pb_languages_formatted.csv', encoding='utf-8')# , sep=';'
 all_languages = {}
 for index, row in tqdm(df.iterrows()): # iterate through all languages in the dataframe
+    flag = True
     language = row['language'].replace("/", " or ")
     family = row['family']
     inventory = row['core inventory']
@@ -232,7 +233,7 @@ for index, row in tqdm(df.iterrows()): # iterate through all languages in the da
                     if list(testset)[0] in natural_classes_perphoneme:
                         natural_classes_perphoneme[list(testset)[0]].append(a)
                     else: 
-                        natural_classes_perphoneme[list(testset)[0]] = []
+                        natural_classes_perphoneme[list(testset)[0]] = [a]
             minsol = min(solutions.keys())
             for s in solutions[minsol]:
                 print(s)
@@ -240,13 +241,38 @@ for index, row in tqdm(df.iterrows()): # iterate through all languages in the da
                 if list(testset)[0] in minimal_natural_classes_perphoneme:
                     minimal_natural_classes_perphoneme[list(testset)[0]].append(s)
                 else: 
-                    minimal_natural_classes_perphoneme[list(testset)[0]] = []
-    print("minimal natural classes", minimal_natural_classes)
-    print("minimal natural classes per phoneme", minimal_natural_classes_perphoneme)
-    print("natural classes per phoneme", natural_classes_perphoneme)
-    min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths = get_general_info_natural_classes(natural_classes_perphoneme, list(fd.keys()))
-    all_languages[language] = {'min_lengths': min_lengths, 'min_descriptions': min_descriptions, 
-                                'count_phoneme': count_phoneme, 'avg_lengths': avg_lengths, 'count_lengths': count_lengths}
+                    minimal_natural_classes_perphoneme[list(testset)[0]] = [s]
+        else:
+            flag = False
+            print('False')
+            print(base, "is not a singleton natural class")
+            break
+            # maxlen = len(feats)
+            # reccheck(fd, feats, modes, [], [], base, 0)
+            # for b in base:
+            #     for s in solutions.values():
+            #         for a in s:
+            #             natural_classes.append(a) 
+            #             if list({b})[0] in natural_classes_perphoneme:
+            #                 natural_classes_perphoneme[list({b})[0]].append(a)
+            #             else: 
+            #                 natural_classes_perphoneme[list({b})[0]] = [a]
+            #     minsol = min(solutions.keys())
+            #     for s in solutions[minsol]:
+            #         print(s)
+            #         minimal_natural_classes.append(s)
+            #         if list({b})[0] in minimal_natural_classes_perphoneme:
+            #             minimal_natural_classes_perphoneme[list({b})[0]].append(s)
+            #         else: 
+            #             minimal_natural_classes_perphoneme[list({b})[0]] = [s]
 
-# with open(f'data_all_languages_{inventoryfile}.json', 'w') as file:
-#     json.dump(all_languages, file)
+    if flag == True:
+        print("minimal natural classes", minimal_natural_classes)
+        print("minimal natural classes per phoneme", minimal_natural_classes_perphoneme)
+        print("natural classes per phoneme", natural_classes_perphoneme)
+        min_lengths, min_descriptions, count_phoneme, avg_lengths, count_lengths = get_general_info_natural_classes(natural_classes_perphoneme, list(fd.keys()))
+        all_languages[language] = {'min_lengths': min_lengths, 'min_descriptions': min_descriptions, 
+                                    'count_phoneme': count_phoneme, 'avg_lengths': avg_lengths, 'count_lengths': count_lengths}
+
+with open(f'data_all_languages_{inventoryfile}.json', 'w') as file:
+    json.dump(all_languages, file)
