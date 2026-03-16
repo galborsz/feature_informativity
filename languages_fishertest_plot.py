@@ -1107,7 +1107,7 @@ if os.path.exists(phoneme_plots_dir_heatmap):
 os.makedirs(phoneme_plots_dir_heatmap)
 
 # Create individual plots for each significant phoneme using heatmap_data MDL
-for phoneme in significant_phonemes:
+for phoneme in all_phonemes: #significant_phonemes:
     # Get languages that contain this phoneme
     languages_with_phoneme = df_lang[df_lang[phoneme] == 1]['language'].tolist()
     

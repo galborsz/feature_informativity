@@ -7,10 +7,33 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import random
 import sys
 from statsmodels.stats.multitest import multipletests
+import seaborn as sns
+
+# === Journal-compliant style ===
+plt.rcParams.update({
+    'font.family': 'Times New Roman',      # or 'serif' if you use Doulos SIL
+    'font.size': 10,                       # base size
+    'axes.titlesize': 11,
+    'axes.labelsize': 10,
+    'xtick.labelsize': 9,
+    'ytick.labelsize': 9,
+    'legend.fontsize': 9,
+    'lines.linewidth': 1.5,                # thicker lines
+    'axes.linewidth': 1.0,
+})
+
+# For even better control, you can also set it per-axis
+sns.set_style("white")   # or "ticks"
 
 # Define inventories
 inventories = ["HC", "SPE", "JFH"]
-colors = ['red', 'green', 'blue']
+# Define colors for each feature system
+inventory_colors = {
+    "HC": "#1f77b4",      # Blue
+    "SPE": "#ff7f0e",     # Orange
+    "JFH": "#2ca02c"      # Green
+}
+random_grey = "#808080"  # Grey for random/null distributions
 
 # Load all data first
 all_data = {}
@@ -223,8 +246,8 @@ def store_feats(solutions_dict, maxlen_ref, fd, feats, modes):
         thissol.append(modes[idx] + fd[feat]["name"])
     solutions_dict[length_feats].append("[" + ",".join(thissol) + "]")
 
-# Function to compute weighted average MDL
-def compute_weighted_avg_mdl(allsegments, min_lengths, min_descriptions):
+# Function to compute average MDL
+def compute_avg_mdl(allsegments, min_lengths, min_descriptions):
     """Compute average minimal description length for a set of phonemes."""
     total_avg_length = 0
     feature_count = 0
@@ -253,7 +276,7 @@ def compute_random_sample_mdl(inventory_size, phoneme_pool, featdict, features):
     # Get informativity information
     sample_min_lengths, sample_min_descriptions, _, _, _ = get_general_info_natural_classes(natural_classes, features)
 
-    random_avg_mdl = compute_weighted_avg_mdl(sampled_phonemes, sample_min_lengths, sample_min_descriptions)
+    random_avg_mdl = compute_avg_mdl(sampled_phonemes, sample_min_lengths, sample_min_descriptions)
     
     if random_avg_mdl:
         return random_avg_mdl
@@ -328,21 +351,21 @@ def compute_random_sample_mdl(inventory_size, phoneme_pool, featdict, features):
 #                 print(f"  Processed {lang_count} languages...")
     
 #     print(f"  Processed {lang_count} languages")
-#     print(f"  Real samples: {len(weighted_avg_mdl[inv]['Real'])}")
-#     print(f"  Random samples: {len(weighted_avg_mdl[inv]['Random'])}")
+#     print(f"  Real samples: {len(avg_mdl[inv]['Real'])}")
+#     print(f"  Random samples: {len(avg_mdl[inv]['Random'])}")
 
-# # Save weighted_avg_mdl to JSON file
-# output_filename = "weighted_avg_mdl_data.json"
+# # Save avg_mdl to JSON file
+# output_filename = "avg_mdl_data.json"
 # with open(output_filename, 'w') as f:
-#     json.dump(weighted_avg_mdl, f, indent=4)
-# print(f"\nweighted_avg_mdl data saved to {output_filename}")
+#     json.dump(avg_mdl, f, indent=4)
+# print(f"\navg_mdl data saved to {output_filename}")
 
-# Load weighted_avg_mdl data from JSON file
+# Load avg_mdl data from JSON file
 input_filename = "weighted_avg_mdl_data.json"
 if os.path.exists(input_filename):
     with open(input_filename, 'r') as f:
-        weighted_avg_mdl = json.load(f)
-    print(f"\nLoaded weighted_avg_mdl data from {input_filename}")
+        avg_mdl = json.load(f)
+    print(f"\nLoaded avg_mdl data from {input_filename}")
 else:
     print(f"\nWarning: {input_filename} not found, using computed data")
 
@@ -359,331 +382,273 @@ def count_frequencies(values, bin_edges):
                 break
     return counts
 
-# Create bar plots for each inventory
-for inv in inventories:
-    if weighted_avg_mdl[inv]["Real"] or weighted_avg_mdl[inv]["Random"]:
-        # Combine all values to determine bin range
-        all_values_inv = weighted_avg_mdl[inv]["Real"] + weighted_avg_mdl[inv]["Random"]
+# ====================== SEPARATE FIGURES FOR OBSERVED AND NULL DISTRIBUTIONS ======================
+def plot_observed_distributions_figure(all_data_by_inv, seed=42):
+    """
+    Creates a figure with observed distributions:
+    - Top row: HC and SPE side by side
+    - Bottom row: JFH centered in the middle
+    
+    Args:
+        all_data_by_inv: dict with keys ['HC', 'SPE', 'JFH'] containing {'Real': [...], 'Random': [...]}
+        seed: Random seed for reproducibility
+    """
+    
+    # Create figure with custom GridSpec layout
+    # 2 rows, 4 columns: HC and SPE take up 2 cols each on top, JFH takes up 2 middle cols on bottom
+    from matplotlib.gridspec import GridSpec
+    fig = plt.figure(figsize=(14, 10))
+    gs = GridSpec(2, 4, figure=fig)
+    
+    ax_hc = fig.add_subplot(gs[0, 0:2])
+    ax_spe = fig.add_subplot(gs[0, 2:4])
+    ax_jfh = fig.add_subplot(gs[1, 1:3])
+    
+    axes_list = [ax_hc, ax_spe, ax_jfh]
+    
+    # First pass: calculate shared axis ranges and bin edges
+    obs_x_min, obs_x_max = float('inf'), float('-inf')
+    obs_y_max = float('-inf')
+    
+    for inv in inventories:
+        real_data = np.array(all_data_by_inv[inv]["Real"])
+        random_data = np.array(all_data_by_inv[inv]["Random"])
         
-        if all_values_inv:
-            min_val = min(all_values_inv)
-            max_val = max(all_values_inv)
-            bin_width = (max_val - min_val) / 50
-            bin_edges = np.arange(min_val, max_val + bin_width, bin_width)
-            
-            # Count frequencies for both Real and Random
-            real_counts = count_frequencies(weighted_avg_mdl[inv]["Real"], bin_edges)
-            random_counts = count_frequencies(weighted_avg_mdl[inv]["Random"], bin_edges)
-            
-            x_vals = [(bin_edges[i] + bin_edges[i+1]) / 2 for i in range(len(bin_edges) - 1)]
-            
-            # Calculate statistics
-            real_median = np.median(weighted_avg_mdl[inv]["Real"]) if weighted_avg_mdl[inv]["Real"] else 0.0
-            random_median = np.median(weighted_avg_mdl[inv]["Random"]) if weighted_avg_mdl[inv]["Random"] else 0.0
-            
-            # Determine color for this inventory
-            color_idx = inventories.index(inv)
-            color_real = colors[color_idx]
-            color_random = 'gray'  # Use gray for random samples
-            
-            # Create plot
-            plt.figure(figsize=(12, 8))
-            
-            # Plot bars
-            plt.bar(x_vals, real_counts, width=bin_width, alpha=0.6, 
-                   color=color_real, label='Real', edgecolor=color_real, linewidth=1.5)
-            
-            if weighted_avg_mdl[inv]["Random"]:
-                plt.bar(x_vals, random_counts, width=bin_width, alpha=0.6,
-                       color=color_random, label='Random', edgecolor=color_random, linewidth=1.5)
-            
-            # Add vertical lines for medians
-            if weighted_avg_mdl[inv]["Real"]:
-                plt.axvline(real_median, color=color_real, linestyle='--', linewidth=2,
-                           label=f'Real Median: {real_median:.2f}')
-            
-            if weighted_avg_mdl[inv]["Random"]:
-                plt.axvline(random_median, color=color_random, linestyle='--', linewidth=2,
-                           label=f'Random Median: {random_median:.2f}')
-            
-            plt.xlabel('Average Minimal Description Length', fontsize=14)
-            plt.ylabel('Language Count', fontsize=14)
-            plt.title(f'Feature system: {inv}', fontsize=16)
-            plt.legend(fontsize=11)
-            plt.grid(True, alpha=0.3)
-            plt.tick_params(labelsize=12)
-            
-            # Save plot
-            plt.tight_layout()
-            plt.savefig(f"mdl_distribution_{inv}.png", dpi=300, bbox_inches='tight')
-            plt.close()
-            
-            print(f"\nPlot saved as mdl_distribution_{inv}.png")
-            print(f"Statistics for {inv}:")
-            print(f"  Real - Total languages: {len(weighted_avg_mdl[inv]['Real'])}")
-            if weighted_avg_mdl[inv]["Real"]:
-                print(f"  Real - Mean: {np.mean(weighted_avg_mdl[inv]['Real']):.2f}")
-                print(f"  Real - Median: {real_median:.2f}")
-            if weighted_avg_mdl[inv]["Random"]:
-                print(f"  Random - Total samples: {len(weighted_avg_mdl[inv]['Random'])}")
-                print(f"  Random - Mean: {np.mean(weighted_avg_mdl[inv]['Random']):.2f}")
-                print(f"  Random - Median: {random_median:.2f}")
-
-# ============================================================
-# PLOT 3 DENSITY VERSION: Individual inventory density plots with Real and Random
-# ============================================================
-
-print("\n" + "-" * 60)
-print("Creating density plot versions of Plot 3...")
-print("-" * 60)
-
-# Create individual density plots for each inventory
-for inv in inventories:
-    if weighted_avg_mdl[inv]["Real"] or weighted_avg_mdl[inv]["Random"]:
-        # Determine color for this inventory
-        color_idx = inventories.index(inv)
-        color_real = colors[color_idx]
-        color_random = 'gray'
+        all_values = np.concatenate([real_data, random_data])
+        obs_x_min = min(obs_x_min, all_values.min())
+        obs_x_max = max(obs_x_max, all_values.max())
         
-        # Calculate statistics
-        real_median = np.median(weighted_avg_mdl[inv]["Real"]) if weighted_avg_mdl[inv]["Real"] else 0.0
-        random_median = np.median(weighted_avg_mdl[inv]["Random"]) if weighted_avg_mdl[inv]["Random"] else 0.0
+        bin_width = (all_values.max() - all_values.min()) / 50
+        bin_edges = np.arange(all_values.min(), all_values.max() + bin_width, bin_width)
+        real_hist, _ = np.histogram(real_data, bins=bin_edges)
+        random_hist, _ = np.histogram(random_data, bins=bin_edges)
+        obs_y_max = max(obs_y_max, real_hist.max(), random_hist.max())
+    
+    # Calculate shared bin edges for all observed distributions
+    shared_bin_width = (obs_x_max - obs_x_min) / 50
+    shared_bin_edges = np.arange(obs_x_min, obs_x_max + shared_bin_width, shared_bin_width)
+    
+    # Process each inventory
+    for plot_idx, inv in enumerate(inventories):
+        real_data = np.array(all_data_by_inv[inv]["Real"])
+        random_data = np.array(all_data_by_inv[inv]["Random"])
         
-        # Create density plot
-        plt.figure(figsize=(12, 8))
+        inv_color = inventory_colors[inv]
         
-        # Add Real data density (KDE only, no histogram)
-        if weighted_avg_mdl[inv]["Real"]:
-            from scipy.stats import gaussian_kde
-            kde_real = gaussian_kde(weighted_avg_mdl[inv]["Real"])
-            x_range = np.linspace(min(weighted_avg_mdl[inv]["Real"]), 
-                                max(weighted_avg_mdl[inv]["Real"]), 100)
-            plt.plot(x_range, kde_real(x_range), color=color_real, linewidth=2.5, label='Real')
-            plt.fill_between(x_range, kde_real(x_range), alpha=0.4, color=color_real)
+        ax = axes_list[plot_idx]
         
-        # Add Random data density (KDE only, no histogram)
-        if weighted_avg_mdl[inv]["Random"]:
-            kde_random = gaussian_kde(weighted_avg_mdl[inv]["Random"])
-            x_range_random = np.linspace(min(weighted_avg_mdl[inv]["Random"]), 
-                                       max(weighted_avg_mdl[inv]["Random"]), 100)
-            plt.plot(x_range_random, kde_random(x_range_random), color=color_random, linewidth=2.5, label='Random')
-            plt.fill_between(x_range_random, kde_random(x_range_random), alpha=0.3, color=color_random)
+        # ------------------- Panel: Observed Distributions -------------------
+        real_hist, _ = np.histogram(real_data, bins=shared_bin_edges)
+        random_hist, _ = np.histogram(random_data, bins=shared_bin_edges)
+        x_vals = (shared_bin_edges[:-1] + shared_bin_edges[1:]) / 2
         
-        # Add vertical lines for medians
-        if weighted_avg_mdl[inv]["Real"]:
-            plt.axvline(real_median, color=color_real, linestyle='--', linewidth=2,
-                       label=f'Real Median: {real_median:.2f}')
+        ax.bar(x_vals, real_hist, width=shared_bin_width*0.92, alpha=0.65,
+                   color=inv_color, label='Real', edgecolor='black', linewidth=1.1)
+        ax.bar(x_vals, random_hist, width=shared_bin_width*0.92, alpha=0.65,
+                   color=random_grey, label='Random', edgecolor='black', linewidth=1.1)
         
-        if weighted_avg_mdl[inv]["Random"]:
-            plt.axvline(random_median, color=color_random, linestyle='--', linewidth=2,
-                       label=f'Random Median: {random_median:.2f}')
+        obs_median_real = np.median(real_data)
+        obs_median_random = np.median(random_data)
         
-        plt.xlabel('Average Minimal Description Length', fontsize=14)
-        plt.ylabel('Density', fontsize=14)
-        plt.title(f'Feature system: {inv}', fontsize=16)
-        plt.legend(fontsize=11)
-        plt.grid(True, alpha=0.3)
-        plt.tick_params(labelsize=12)
+        ax.axvline(obs_median_real, color=inv_color, linestyle='--', linewidth=2.8)
+        ax.axvline(obs_median_random, color=random_grey, linestyle='--', linewidth=2.8)
         
-        # Perform Monte-Carlo permutation test between Real and Random
-        if weighted_avg_mdl[inv]["Real"] and weighted_avg_mdl[inv]["Random"]:
-            def permutation_pvalue(x, y, n_perm=5000, seed=0):
-                """Two-sample Monte-Carlo permutation test using median difference as test statistic."""
-                rng = np.random.default_rng(seed)
-                x = np.array(x)
-                y = np.array(y)
-                obs_diff = abs(np.median(x) - np.median(y))
-                pooled = np.concatenate([x, y])
-                n_x = len(x)
-                count = 0
-                for _ in range(n_perm):
-                    rng.shuffle(pooled)
-                    x_perm = pooled[:n_x]
-                    y_perm = pooled[n_x:]
-                    if abs(np.median(x_perm) - np.median(y_perm)) >= obs_diff:
-                        count += 1
-                return (count + 1) / (n_perm + 1)
-            
-            def rank_biserial_unpaired(x, y):
-                """Compute rank-biserial effect size for unpaired samples."""
-                scores = []
-                for xi in x:
-                    for yj in y:
-                        if xi > yj:
-                            scores.append(1.0)
-                        elif xi == yj:
-                            scores.append(0.5)
-                        else:
-                            scores.append(0.0)
-                A = np.mean(scores)
-                return 2 * A - 1  # in [-1,1]
-            
-            p_real_random = permutation_pvalue(weighted_avg_mdl[inv]["Real"], 
-                                               weighted_avg_mdl[inv]["Random"],
-                                               n_perm=5000, seed=42)
-            r_real_random = rank_biserial_unpaired(weighted_avg_mdl[inv]["Real"], 
-                                                   weighted_avg_mdl[inv]["Random"])
-            n_real = len(weighted_avg_mdl[inv]["Real"])
-            n_random = len(weighted_avg_mdl[inv]["Random"])
-            
-            print(f"\n  Monte-Carlo permutation test for {inv} (Real vs Random):")
-            print(f"    p-value = {p_real_random:.4g}")
-            print(f"    effect size (rank-biserial) = {r_real_random:.3f}")
-            print(f"    sample size (Real) = {n_real}")
-            print(f"    sample size (Random) = {n_random}")
+        # Add text annotations for medians positioned to the side
+        # Position labels higher on the y-axis
+        y_pos = obs_y_max * 0.9
         
-        # Save density plot
-        plt.tight_layout()
-        plt.savefig(f"mdl_distribution_{inv}_density.png", dpi=300, bbox_inches='tight')
-        plt.close()
+        # Determine which median is left and which is right
+        if obs_median_real < obs_median_random:
+            # Real is on the left, Random is on the right
+            ax.text(obs_median_real - (obs_x_max - obs_x_min) * 0.03, y_pos, 
+                    f'Median\n{obs_median_real:.3f}', 
+                    fontsize=14, color=inv_color, fontweight='bold', ha='right',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='none'))
+            ax.text(obs_median_random + (obs_x_max - obs_x_min) * 0.03, y_pos, 
+                    f'Median\n{obs_median_random:.3f}', 
+                    fontsize=14, color=random_grey, fontweight='bold', ha='left',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='none'))
+        else:
+            # Random is on the left, Real is on the right
+            ax.text(obs_median_random - (obs_x_max - obs_x_min) * 0.03, y_pos, 
+                    f'Median\n{obs_median_random:.3f}', 
+                    fontsize=14, color=random_grey, fontweight='bold', ha='right',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='none'))
+            ax.text(obs_median_real + (obs_x_max - obs_x_min) * 0.03, y_pos, 
+                    f'Median\n{obs_median_real:.3f}', 
+                    fontsize=14, color=inv_color, fontweight='bold', ha='left',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='none'))
         
-        print(f"\nDensity plot saved as mdl_distribution_{inv}_density.png")
+        # Set shared axis ranges with increased y-max to ensure nothing gets cut off
+        ax.set_xlim(obs_x_min, obs_x_max)
+        ax.set_ylim(0, obs_y_max * 1.25)
+        
+        ax.set_xlabel('Average Minimal Description Length', fontsize=16)
+        ax.set_ylabel('Language Count', fontsize=16)
+        ax.set_title(f'Feature system: {inv}', fontsize=18, fontweight='bold')
+        ax.tick_params(labelsize=16)
+        ax.legend(fontsize=16)
+        ax.grid(True, alpha=0.25, axis='y')
+        
+        # Clean appearance
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    return fig
 
-print("\n" + "-" * 60)
-print("Creating violin plot comparing all three feature systems...")
-print("-" * 60)
 
-# Create violin plot comparing Real distributions across all three feature systems
-fig, ax = plt.subplots(figsize=(12, 8))
-
-# Prepare data for violin plot
-violin_data = [weighted_avg_mdl[inv]["Real"] for inv in inventories]
-
-# Create violin plot
-positions = [1, 2, 3]
-parts = ax.violinplot(violin_data, positions=positions, widths=0.7, showmeans=False, showmedians=False)
-
-# Color the violin plots
-for i, pc in enumerate(parts['bodies']):
-    pc.set_facecolor(colors[i])
-    pc.set_alpha(0.6)
-    pc.set_edgecolor(colors[i])
-    pc.set_linewidth(1.5)
-
-# Color other parts
-for partname in ('cbars', 'cmins', 'cmaxes'):
-    if partname in parts:
-        vp = parts[partname]
-        vp.set_edgecolor(colors[i])
-        vp.set_linewidth(1.5)
-
-# Add median lines
-for i, inv in enumerate(inventories):
-    median_val = np.median(weighted_avg_mdl[inv]["Real"])
-    ax.plot([positions[i] - 0.2, positions[i] + 0.2], [median_val, median_val], 
-            color=colors[i], linewidth=2)
-
-# Set up x-axis
-ax.set_xticks(positions)
-ax.set_xticklabels(inventories)
-ax.set_xlabel('Feature System', fontsize=14)
-ax.set_ylabel('Average Minimal Description Length', fontsize=14)
-ax.set_title('Real Language Distributions by Feature System', fontsize=16)
-ax.grid(True, axis='y', alpha=0.3)
-
-# Calculate statistics and add significance brackets
-def permutation_pvalue(x, y, n_perm=5000, seed=0):
-    """Two-sample Monte-Carlo permutation test using median difference as test statistic."""
+def statistical_analysis(all_data_by_inv, n_perm=5000, seed=42):
     rng = np.random.default_rng(seed)
-    x = np.array(x)
-    y = np.array(y)
-    obs_diff = abs(np.median(x) - np.median(y))
-    pooled = np.concatenate([x, y])
-    n_x = len(x)
-    count = 0
-    for _ in range(n_perm):
-        rng.shuffle(pooled)
-        x_perm = pooled[:n_x]
-        y_perm = pooled[n_x:]
-        if abs(np.median(x_perm) - np.median(y_perm)) >= obs_diff:
-            count += 1
-    return (count + 1) / (n_perm + 1)
-
-def p_to_stars(p):
-    """Map corrected p-value to significance stars."""
-    if p <= 0.001:
-        return '***'
-    if p <= 0.01:
-        return '**'
-    if p <= 0.05:
-        return '*'
-    return ''
-
-def rank_biserial_unpaired(x, y):
-    """Compute rank-biserial effect size for unpaired samples."""
-    scores = []
-    for xi in x:
-        for yj in y:
-            if xi > yj:
-                scores.append(1.0)
-            elif xi == yj:
-                scores.append(0.5)
-            else:
-                scores.append(0.0)
-    A = np.mean(scores)
-    return 2 * A - 1  # in [-1,1]
-
-# Collect raw p-values for all three pairwise comparisons
-pairs_to_test = [
-    ('HC', 'SPE', 0, 1),
-    ('SPE', 'JFH', 1, 2),
-    ('HC', 'JFH', 0, 2)
-]
-
-pvals_raw = []
-effect_sizes = []
-for inv1, inv2, pos1, pos2 in pairs_to_test:
-    p_val = permutation_pvalue(weighted_avg_mdl[inv1]["Real"],
-                               weighted_avg_mdl[inv2]["Real"],
-                               n_perm=5000, seed=42)
-    r_pair = rank_biserial_unpaired(weighted_avg_mdl[inv1]["Real"],
-                                    weighted_avg_mdl[inv2]["Real"])
-    pvals_raw.append(p_val)
-    effect_sizes.append(r_pair)
-
-# Apply Benjamini-Hochberg FDR correction
-pvals_array = np.array(pvals_raw)
-rejected, pvals_corrected, _, _ = multipletests(pvals_array, alpha=0.05, method='fdr_bh')
-
-# Find max y value for positioning brackets
-max_y = max([max(weighted_avg_mdl[inv]["Real"]) for inv in inventories])
-data_range = max_y - min([min(weighted_avg_mdl[inv]["Real"]) for inv in inventories])
-bracket_spacing = data_range * 0.08
-tick_height = data_range * 0.02
-
-# Draw brackets and print results for each comparison
-for i, (inv1, inv2, pos1, pos2) in enumerate(pairs_to_test):
-    p_adj = pvals_corrected[i]
-    stars = p_to_stars(p_adj)
-    r_pair = effect_sizes[i]
+        
+    row_data = []  # Store permutation data for each inventory
     
-    y_bracket = max_y + (i + 1) * bracket_spacing
-    ax.plot([positions[pos1], positions[pos2]], [y_bracket, y_bracket], 
-            color='black', linewidth=2)
-    ax.plot([positions[pos1], positions[pos1]], [y_bracket - tick_height, y_bracket + tick_height], 
-            color='black', linewidth=2)
-    ax.plot([positions[pos2], positions[pos2]], [y_bracket - tick_height, y_bracket + tick_height], 
-            color='black', linewidth=2)
-    ax.text((positions[pos1] + positions[pos2]) / 2, y_bracket + 0.05, stars, 
-            ha='center', fontsize=14, fontweight='bold')
+    # First pass: calculate shared y-axis range
+    null_y_max = float('-inf')
     
-    print(f"\nMonte-Carlo permutation test - {inv1} vs {inv2}:")
-    print(f"  Raw p-value = {pvals_raw[i]:.4g}")
-    print(f"  Corrected p-value (BH) = {p_adj:.4g}")
-    print(f"  Effect size (rank-biserial) = {r_pair:.3f}")
-    print(f"  Significance: {stars if stars else 'ns (not significant)'}")
+    for inv in inventories:
+        real_data = np.array(all_data_by_inv[inv]["Real"])
+        random_data = np.array(all_data_by_inv[inv]["Random"])
+        
+        obs_median_real = np.median(real_data)
+        obs_median_random = np.median(random_data)
+        obs_diff = obs_median_real - obs_median_random
+        
+        pooled = np.concatenate([real_data, random_data])
+        n_real = len(real_data)
+        perm_diffs = []
+        
+        for _ in range(n_perm):
+            rng.shuffle(pooled)
+            x_perm = pooled[:n_real]
+            y_perm = pooled[n_real:]
+            perm_diffs.append(np.median(x_perm) - np.median(y_perm))
+        
+        perm_diffs_counts, _ = np.histogram(perm_diffs, bins=40, density=True)
+        null_y_max = max(null_y_max, perm_diffs_counts.max())
+    
+    # Process each inventory
+    for row_idx, inv in enumerate(inventories):
+        real_data = np.array(all_data_by_inv[inv]["Real"])
+        random_data = np.array(all_data_by_inv[inv]["Random"])
+        
+        # ====================== Permutation test ======================
+        obs_median_real = np.median(real_data)
+        obs_median_random = np.median(random_data)
+        obs_diff = obs_median_real - obs_median_random
+        
+        pooled = np.concatenate([real_data, random_data])
+        n_real = len(real_data)
+        perm_diffs = []
+        
+        for _ in range(n_perm):
+            rng.shuffle(pooled)
+            x_perm = pooled[:n_real]
+            y_perm = pooled[n_real:]
+            perm_diffs.append(np.median(x_perm) - np.median(y_perm))
+        
+        perm_diffs = np.array(perm_diffs)
+        
+        # Two-sided p-value (Monte-Carlo)
+        count = np.sum(np.abs(perm_diffs) >= np.abs(obs_diff))
+        p_value = (count + 1) / (n_perm + 1)
+        
+        row_data.append({
+            'real': real_data,
+            'random': random_data,
+            'perm_diffs': perm_diffs,
+            'obs_diff': obs_diff,
+            'obs_median_real': obs_median_real,
+            'obs_median_random': obs_median_random,
+            'p_value': p_value
+        })
+        
+    return row_data
 
-# Set y-axis limits to accommodate brackets
-y_lower = min([min(weighted_avg_mdl[inv]["Real"]) for inv in inventories]) - data_range * 0.05
-y_upper = max_y + 4 * bracket_spacing + data_range * 0.08
-ax.set_ylim(y_lower, y_upper)
 
-ax.tick_params(labelsize=12)
-plt.tight_layout()
-plt.savefig("real_distributions_violin.png", dpi=300, bbox_inches='tight')
-plt.close()
+# ====================== USAGE: CREATE SEPARATE FIGURES ======================
+# Create separate figures for observed and null distributions
+fig_obs = plot_observed_distributions_figure(avg_mdl, seed=42)
+row_data = statistical_analysis(avg_mdl, n_perm=5000, seed=42)
 
-print(f"\nViolin plot saved as real_distributions_violin.png")
+# Save observed distributions at publication quality
+fig_obs.savefig("mdl_observed_distributions.pdf", dpi=1200, bbox_inches='tight', pad_inches=0.05)
+fig_obs.savefig("mdl_observed_distributions.tif", dpi=1200, bbox_inches='tight', pad_inches=0.05)
+fig_obs.savefig("mdl_observed_distributions.png", dpi=1200, bbox_inches='tight', pad_inches=0.05)
 
-print("\n✓ All plots created successfully!")
+plt.close(fig_obs)
+
+# Print summary statistics
+print("\n" + "="*70)
+print("PERMUTATION TEST RESULTS - MINIMAL DESCRIPTION LENGTH ANALYSIS")
+print("="*70)
+
+for idx, inv in enumerate(inventories):
+    data = row_data[idx]
+    real = data['real']
+    random = data['random']
+    perm_diffs = data['perm_diffs']
+    obs_diff = data['obs_diff']
+    obs_median_real = data['obs_median_real']
+    obs_median_random = data['obs_median_random']
+    p_value = data['p_value']
+    
+    # Calculate additional statistics
+    n_real = len(real)
+    n_random = len(random)
+    n_perm = len(perm_diffs)
+    
+    # Effect size: Cohen's d-like measure
+    pooled_std = np.sqrt((np.std(real, ddof=1)**2 + np.std(random, ddof=1)**2) / 2)
+    effect_size = obs_diff / pooled_std if pooled_std > 0 else 0
+    
+    # Confidence interval for the permutation difference distribution
+    ci_lower = np.percentile(perm_diffs, 2.5)
+    ci_upper = np.percentile(perm_diffs, 97.5)
+    
+    # Additional statistics
+    mean_real = np.mean(real)
+    mean_random = np.mean(random)
+    std_real = np.std(real, ddof=1)
+    std_random = np.std(random, ddof=1)
+    
+    print(f"\n{inv} Feature System:")
+    print("-" * 70)
+    print(f"  Sample Sizes:")
+    print(f"    Real languages: n = {n_real}")
+    print(f"    Random samples: n = {n_random}")
+    print(f"\n  Central Tendency (Medians):")
+    print(f"    Real median MDL:     {obs_median_real:.4f}")
+    print(f"    Random median MDL:   {obs_median_random:.4f}")
+    print(f"    Observed difference: {obs_diff:.4f}")
+    print(f"\n  Central Tendency (Means):")
+    print(f"    Real mean MDL:       {mean_real:.4f} (SD = {std_real:.4f})")
+    print(f"    Random mean MDL:     {mean_random:.4f} (SD = {std_random:.4f})")
+    print(f"\n  Permutation Test Details:")
+    print(f"    Test name: Two-sided Monte-Carlo permutation test")
+    print(f"    Test statistic: Difference in medians")
+    print(f"    Number of permutations: {n_perm:,}")
+    print(f"    Permutation dist. mean: {np.mean(perm_diffs):.4f}")
+    print(f"    Permutation dist. SD:   {np.std(perm_diffs, ddof=1):.4f}")
+    print(f"\n  Statistical Results:")
+    print(f"    p-value (two-sided): {p_value:.4g}")
+    print(f"    Effect size (Cohen's d-like): {effect_size:.4f}")
+    print(f"    95% CI of perm. dist.: [{ci_lower:.4f}, {ci_upper:.4f}]")
+    print(f"\n  Interpretation:")
+    if p_value < 0.001:
+        sig = "*** (p < 0.001)"
+    elif p_value < 0.01:
+        sig = "** (p < 0.01)"
+    elif p_value < 0.05:
+        sig = "* (p < 0.05)"
+    else:
+        sig = "ns (p >= 0.05)"
+    print(f"    Significance: {sig}")
+    print(f"    Direction: {'Real > Random' if obs_diff > 0 else 'Real < Random' if obs_diff < 0 else 'No difference'}")
+
+print("\n" + "="*70)
+print("✓ Saved observed distributions: mdl_observed_distributions.pdf/tif/png")
+print("✓ Saved null distributions: mdl_null_distributions.pdf/tif/png")
+print("="*70 + "\n")
+
 

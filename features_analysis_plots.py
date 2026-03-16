@@ -16,6 +16,22 @@ for inv in inventories:
     with open(filename, 'r') as f:
         all_data[inv] = json.load(f)
 
+# Filter to keep only languages present in ALL inventories
+language_sets = {inv: set(all_data[inv].keys()) for inv in inventories}
+print(f"Size of language sets before filtering: { {inv: len(s) for inv, s in language_sets.items()} }")
+common_languages = set.intersection(*language_sets.values())
+print(f"Number of common languages across all inventories: {len(common_languages)}")
+
+print(f"\nLanguage counts before filtering:")
+for inv in inventories:
+    print(f"  {inv}: {len(language_sets[inv])} languages")
+
+print(f"\nCommon languages across all inventories: {len(common_languages)}")
+
+# Keep only common languages in all_data
+for inv in inventories:
+    all_data[inv] = {lang: all_data[inv][lang] for lang in common_languages}
+
 # Load pb_languages_formatted.csv to get language families
 pb_languages = pd.read_csv("phonemic_inventories/pb_languages_formatted.csv")
 
@@ -29,6 +45,7 @@ def create_phoneme_feature_analysis_plot(phoneme, output_dir="phoneme_feature_an
     # Collect data for this phoneme across all inventories
     swarm_data_by_inv = {}
     lang_counts_by_inv = {}
+    all_values = {}  # Move this outside the loop
     
     for inv in inventories:
         swarm_data_by_inv[inv] = []
@@ -36,7 +53,10 @@ def create_phoneme_feature_analysis_plot(phoneme, output_dir="phoneme_feature_an
         
         # Load the data for this inventory
         data_inv = all_data[inv]
-        
+        all_values[inv] = {}
+        if phoneme not in all_values[inv]:
+            all_values[inv][phoneme] = {}
+
         # Iterate through all languages
         for language, lang_data in data_inv.items():
             min_descriptions = lang_data["min_descriptions"]
@@ -44,14 +64,22 @@ def create_phoneme_feature_analysis_plot(phoneme, output_dir="phoneme_feature_an
             
             # Check if this phoneme is described in this language
             if phoneme in min_descriptions:
+
                 feature_desc = min_descriptions[phoneme]
                 
                 # Extract all unique features from feature_desc
                 features_set = set()
                 for mindesc in feature_desc:
                     for feat in mindesc:
-                        if len(feat) > 0 and feat[0] == '+':
-                            features_set.add(feat.strip('+'))
+                        if len(feat) > 0:
+                            features_set.add(feat.strip('+-'))
+                            if feat.strip('+-') not in all_values[inv][phoneme]:
+                                all_values[inv][phoneme][feat.strip('+-')] = feat[0]  # Store the original feature with sign for later reference
+                            else:
+                                if feat[0] != all_values[inv][phoneme][feat.strip('+-')]:
+                                    print(f"    Warning: Conflicting feature values for {feat.strip('+-')} in language {language} ({inv}): '{all_values[inv][phoneme][feat.strip('+-')]}' vs '{feat[0]}'")
+                        # if len(feat) > 0 and feat[0] == '+':
+                        #     features_set.add(feat.strip('+'))
                 
                 features_list = list(features_set)
 
@@ -81,7 +109,7 @@ def create_phoneme_feature_analysis_plot(phoneme, output_dir="phoneme_feature_an
             n_features = df_inv['feature'].nunique()
             n_languages = df_inv['language'].nunique()
             print(f"    {inv}: {n_points} data points ({n_features} features, {n_languages} languages)")
-    
+
     # Convert to DataFrames
     dfs = {}
     for inv in inventories:
@@ -122,7 +150,7 @@ def create_phoneme_feature_analysis_plot(phoneme, output_dir="phoneme_feature_an
         
         # Create stacked bar plot
         grouped.plot(kind='bar', stacked=True, ax=ax, 
-                    color=['#1f77b4', '#ff7f0e', '#2ca02c'], 
+                    color=["#ff0e0e", "#fe6d6d", "#f7b1b1"], 
                     width=0.8, edgecolor=None, linewidth=0.5, alpha=0.8)
         
         # Add count annotations on top of each stacked section
@@ -141,7 +169,9 @@ def create_phoneme_feature_analysis_plot(phoneme, output_dir="phoneme_feature_an
         # Customize subplot
         ax.set_xlabel('Feature', fontsize=14)
         ax.set_ylabel('Language Count', fontsize=14)
-        ax.set_xticklabels(grouped.index, rotation=45, ha='right', fontweight='bold', fontsize=12)
+        # Add +/- signs to feature names from all_values
+        feature_labels = [f"{all_values[inv][phoneme].get(feat, '')}{feat}" for feat in grouped.index]
+        ax.set_xticklabels(feature_labels, rotation=45, ha='right', fontweight='bold', fontsize=12)
         ax.set_title(f'{inv}\n(n={len(df)} points)', # , {df["feature"].nunique()} features
                     fontsize=11, fontweight='bold')
         
@@ -193,147 +223,6 @@ def create_phoneme_feature_analysis_plot(phoneme, output_dir="phoneme_feature_an
             for feat, count in feature_lang_counts.items():
                 mdl_vals = df[df['feature'] == feat]['MDL'].unique()
                 print(f"        {feat:15s}: {count} languages, MDL values: {sorted(mdl_vals)}")
-
-
-def create_phoneme_upset_plot(phoneme, output_dir="phoneme_feature_analysis_plots"):
-    """Create stacked bar plots showing feature combinations and their language counts by MDL value."""
-    print(f"\nGenerating feature combination plots for phoneme: /{phoneme}/")
-    
-    # Create output directory if it doesn't exist
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    
-    # Collect data for this phoneme across all inventories
-    phoneme_data_by_inv = {}
-    
-    for inv in inventories:
-        phoneme_data_by_inv[inv] = {}
-        
-        # Load the data for this inventory
-        data_inv = all_data[inv]
-        
-        # Iterate through all languages
-        for language, lang_data in data_inv.items():
-            min_descriptions = lang_data["min_descriptions"]
-            min_lengths = lang_data["min_lengths"]
-            
-            # Check if this phoneme is described in this language
-            if phoneme in min_descriptions:
-                feature_desc = min_descriptions[phoneme]
-                
-                # Extract all unique features from feature_desc
-                features_set = set()
-                for mindesc in feature_desc:
-                    for feat in mindesc:
-                        if feat[0] == '+':
-                            features_set.add(feat.strip('+'))
-                
-                # Get MDL values for each feature
-                for feature in features_set:
-                    if feature in min_lengths:
-                        mdl_val = int(min_lengths[feature])
-                        if language not in phoneme_data_by_inv[inv]:
-                            phoneme_data_by_inv[inv][language] = {}
-                        phoneme_data_by_inv[inv][language][feature] = mdl_val
-    
-    # Check if we have data
-    total_data_points = sum(len(data) for data in phoneme_data_by_inv.values())
-    if total_data_points == 0:
-        print(f"  Warning: No data found for phoneme /{phoneme}/ across any feature system")
-        return
-    
-    # Create feature combination plots for each inventory
-    for inv in inventories:
-        if len(phoneme_data_by_inv[inv]) == 0:
-            print(f"  Skipping {inv} - no data")
-            continue
-        
-        # Get all unique features for this phoneme in this inventory
-        all_features = set()
-        for lang_features in phoneme_data_by_inv[inv].values():
-            all_features.update(lang_features.keys())
-        
-        all_features = sorted(list(all_features))
-        
-        print(f"  Creating {len(all_features)} feature combination plots for {inv}")
-        
-        # For each feature, create an UpSet-style stacked bar plot
-        for primary_feature in all_features:
-            
-            # Get all languages that have this primary feature
-            langs_with_primary = [lang for lang, feats in phoneme_data_by_inv[inv].items() 
-                                 if primary_feature in feats]
-            primary_mdl_per_lang = {lang: phoneme_data_by_inv[inv][lang][primary_feature] 
-                                   for lang in langs_with_primary}
-            
-            # Get all other features
-            other_features = [f for f in all_features if f != primary_feature]
-            
-            # Create bars for: primary feature alone + each combination with another feature
-            bar_labels = [primary_feature]  # First bar is primary feature alone
-            bar_data = {1: [], 2: [], 3: []}  # Count of languages per MDL value
-            
-            # First bar: primary feature alone (all languages with primary feature)
-            for mdl_val in [1, 2, 3]:
-                count = sum(1 for mdl in primary_mdl_per_lang.values() if mdl == mdl_val)
-                bar_data[mdl_val].append(count)
-            
-            # Subsequent bars: primary feature + another feature (co-occurrence)
-            for other_feature in other_features:
-                # Get languages that have BOTH primary feature and other feature
-                langs_with_both = [lang for lang in langs_with_primary 
-                                  if other_feature in phoneme_data_by_inv[inv][lang]]
-                
-                # For these languages, use the MDL of the primary feature
-                for mdl_val in [1, 2, 3]:
-                    count = sum(1 for lang in langs_with_both 
-                               if primary_mdl_per_lang[lang] == mdl_val)
-                    bar_data[mdl_val].append(count)
-                
-                bar_labels.append(f"{primary_feature}\n+{other_feature}")
-            
-            # Create stacked bar plot
-            x_pos = np.arange(len(bar_labels))
-            bottom = np.zeros(len(bar_labels))
-            
-            colors = ['#1f77b4', '#ff7f0e', '#2ca02c']  # Blue, Orange, Green for MDL 1, 2, 3
-            
-            fig, ax = plt.subplots(figsize=(max(12, len(bar_labels) * 1.5), 7))
-            
-            for mdl_idx, mdl_val in enumerate([1, 2, 3]):
-                values = np.array(bar_data[mdl_val])
-                ax.bar(x_pos, values, bottom=bottom, label=f'MDL={mdl_val}', 
-                       color=colors[mdl_idx], edgecolor='black', linewidth=0.7)
-                
-                # Add value labels on bars
-                for i, v in enumerate(values):
-                    if v > 0:
-                        ax.text(i, bottom[i] + v/2, str(int(v)), ha='center', va='center', 
-                               fontsize=9, fontweight='bold', color='white')
-                
-                bottom += values
-            
-            # Customize plot
-            ax.set_xlabel('Feature Combinations', fontsize=12, fontweight='bold')
-            ax.set_ylabel('Language Count', fontsize=12, fontweight='bold')
-            ax.set_title(f'Feature Combinations: /{phoneme}/ in {inv}\nPrimary: {primary_feature}', 
-                        fontsize=12, fontweight='bold')
-            ax.set_xticks(x_pos)
-            ax.set_xticklabels(bar_labels, fontsize=10, rotation=45, ha='right')
-            ax.legend(title='MDL Value', fontsize=10, title_fontsize=11, loc='upper right')
-            ax.grid(True, alpha=0.3, axis='y')
-            ax.set_axisbelow(True)
-            
-            plt.tight_layout()
-            
-            # Save plot
-            safe_phoneme_name = phoneme.replace('/', '_').replace(' ', '_')
-            safe_feature_name = primary_feature.replace('/', '_').replace(' ', '_').replace('+', 'plus')
-            filename = os.path.join(output_dir, f'phoneme_{safe_phoneme_name}_{inv}_upset_{safe_feature_name}.png')
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
-            plt.close()
-    
-    print(f"  Feature combination plots complete for /{phoneme}/")
 
 
 # Example usage: Create plots for multiple phonemes
